@@ -1,0 +1,116 @@
+<Prog> ::= <Line>
+	| <Prog> '\n' <Line>
+	
+<Line> ::= NUMBER <stmts>
+	| <stmt> ': '<stmts>
+
+<stmt> ::= REM
+	| QUOTEREM
+	| BYE
+	| CALL <expr>
+	| CHANGE <var> TO <var>
+	| CLS
+	| CMD
+	| DATA <exprlist>
+	| DEF <userfunc> '=' <expr>
+	| DEFDBL <varlist>
+	| DEFINT <varlist>
+	| DEFSNG <varlist>
+	| DEFSTR <varlist>
+	| DIM <varlist>
+	| END
+	| EXIT
+	| FOR <var> '=' <expr> TO <expr>
+	| FOR <var> '=' <expr> TO <expr> STEP <expr>
+	| GOSUB NUMBER
+	| GOSUB <expr>
+	| GOSUB <expr> OF <exprlist>
+	| GOTO NUMBER
+	| GOTO <expr>
+	| GOTO <expr> OF <exprlist>
+	| INPUT <printlist>
+	| IF <expr> THEN NUMBER
+	| IF <expr> GOTO NUMBER
+	| IF <expr> THEN <stmts>
+	| LET <var> '=' <expr>
+	| NEXT <varlist>
+	| NEXT 
+	| NEW
+	| ON <expr> GOTO <exprlist>
+	| ON <expr> GOSUB <exprlist>
+	| OPTION BASE <expr>
+	| POKE <expr> ',' <expr>
+	| POP
+	| PRINT <printlist>
+	| PRINT USING <expr> ';' <printlist>
+	| RANDOMIZE
+	| RANDOMIZE <expr>
+	| READ <varlist>
+	| RESTORE
+	| RESTORE <expr>
+	| RETURN
+	| STOP
+	| STOP <expr>
+	| STRING <expr>
+	| SYS <expr>
+	| TIME_STR '=' <expr>
+	| LET TIME_STR '=' <expr>
+	| VARLIST
+	| WAIT <expr>
+	| <var> '=' <expr>
+<expr> ::= <expr0>
+<expr0> ::= <expr1>
+	| <expr0> <binary_op> <expr1>
+<binary_op> ::= AND | OR
+<expr1> ::= <expr2>
+	| <expr1> <cmp_op> <expr2>
+<cmp_op> ::= '='
+	| '<'
+	| '>'
+	| CMP_LE
+	| CMP_GE
+	| CMP_NE
+	| CMP_HASH
+<expr2> ::= <expr3>
+	| <expr2> <e2op> <expr3>
+<e2op> ::= '+' | '-' | '&'
+<expr3> ::= <expr4>
+	| <expr3> <term> <expr4>
+<term> ::= '*' | '/' | '^'
+<expr4> ::= <func>
+	| <unary_op> <func>
+<unary_op> ::= '-' | NOT
+<func> ::= <factor>
+	| <fn0>
+	| <fn0> '(' ')'
+	| <fn0> '(' <expr> ')'
+	| <fn1> '(' <expr> ')'
+	| <fn2> '(' <expr> ',' <expr> ')'
+	| <fnx> '(' <expr> ',' <expr> ',' <expr> ')'
+<fn0> ::= FRE | RND | TIME | TIME_STR
+<fn1> ::= ABS | ATN | CHR | CLOG | COS | EXP | FIX | INT | LCASE | LEN | LIN | STR | LOG | PEEK | SGN | SIN | SPC | SQR | TAB | VAL | UCASE | USR 
+<fn2> ::= LEFT | RIGHT | STRNG
+<fnx> ::= MID | SEG | SUBSTR
+<factor> ::= NUMBER
+	| STRING
+	| <var>
+	| <userfunc>
+	| '(' <expr> ')'
+<userfunc> ::= FUNCTION_NAME '(' <exprlist> ')'
+<var> ::= VARIABLE_NAME 
+	| VARIALBE_NAME '(' <exprlist> ')'
+	| VARIABLE_NAME '[' <exprlist> ']'
+	| VARIALBE_NAME '(' <slicelist> ')'
+	| VARIALBE_NAME '(' <exprlist> ')' '(' <slicelist> ')'
+<printlist> ::= <expr>
+	| <printlist> <expr>
+	| <printsep>
+	| <printlist> <printsep>
+<printsep> ::= ',' | ';'
+<exprlist> ::= <expr>
+	| <exprlist> ',' <expr>
+<slicelist> ::= <expr> ':' <expr>
+<varlist> ::= <var>
+	| <varlist> ',' <var>
+<numlist> ::= NUMBER
+	| <numlist> ',' NUMBER
