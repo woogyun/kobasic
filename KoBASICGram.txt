@@ -2,6 +2,8 @@
 	| <Prog> '\n' <Line>
 	
 <Line> ::= NUMBER <stmts>
+
+<stmts> ::= <stmt> 
 	| <stmt> ': '<stmts>
 
 <stmt> ::= REM
