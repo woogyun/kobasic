@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string.h>
+#include <stdlib.h>
 
 #define MAXLEN 100
 
@@ -115,7 +116,19 @@
 #define DEFINT 239
 #define DEFSNG 240
 
-using namespace std;
+struct _node;
+
+typedef union _AttrVal{
+	int ival;
+	char* sval;
+	struct _node* pval;
+} AttrVal;
+
+typedef struct _node {
+	int nID;
+	AttrVal val;
+	struct _node *son, *bro; 
+} Node;
 
 int getToken();
 void printToken(int token);
@@ -141,7 +154,9 @@ void ExprList();
 void SliceList();
 void VarList();
 void NumList();
-int lookahead = -1;
+int lookahead;
+AttrVal attrVal;
+Node* newNode(int);
 
 int main(void) {
 	lookahead = getToken();
@@ -171,13 +186,13 @@ int getToken() {
 					break;
 				}
 			}
+			attrVal.ival = atoi(buffer);
 			return NUMBER;
 		}
 		
 		// stirng token
 		if (c == '"') {
 			while (c = getchar()) {
-				buffer[i++] = c;
 				if (c != '"') {
 					buffer[i++] = c;					
 				}
@@ -186,6 +201,8 @@ int getToken() {
 					break;
 				}
 			}
+			attrVal.sval = (char*)malloc(strlen(buffer) + 1);
+			strcpy(attrVal.sval, buffer);
 			return STRING;
 		}
 		
@@ -199,6 +216,10 @@ int getToken() {
 				else {
 					ungetc(c, fp);
 					buffer[i] = '\0';
+					
+					// to upper
+					for(char* c = buffer; *c = toupper(*c); c++);
+					
 					if (!strcmp(buffer, "REM")) return REM;
 					else if (!strcmp(buffer, "QUOTEREM")) return QUOTEREM;
 					else if (!strcmp(buffer, "BYE")) return BYE;
@@ -322,12 +343,15 @@ void printToken(int token) {
 	if (token == -1) {
 		printf("Not A Token");
 	}
+	else if (token == STRING) {
+	    printf("STRING(%s)", attrVal.sval);
+	}
+	else if (token == NUMBER) {
+		printf("NUM(%d)", attrVal.ival);
+	} 
 	else if (token == QUOTEREM) {
 		printf("QUOTEREM");
 	}
-	else if (token == NUMBER) {
-		printf("NUMBER");
-	} 
 	else if (token == BYE) {
 		printf("BYE");
 	}
@@ -420,9 +444,6 @@ void printToken(int token) {
 	}
 	else if (token == STOP) {
 	    printf("STOP");
-	}
-	else if (token == STRING) {
-	    printf("STRING");
 	}
 	else if (token == SYS) {
 	    printf("SYS");
@@ -659,16 +680,15 @@ void printToken(int token) {
 }
 
 void match(int expected) {
-	cout << "match ";
-	printToken(lookahead);
+	printToken(expected);
 	printf("\n");
     if (lookahead == expected) {
         lookahead = getToken();
     }
     else {
-        cout << "Syntax error: Expected token ";
+        printf("Syntax error: Expected token ");
 		printToken(expected);
-		cout << ", found token ";
+		printf(", found token ");
 		printToken(lookahead);
 		printf("\n");
         exit(1);
@@ -676,7 +696,6 @@ void match(int expected) {
 }
 
 void Prog() {
-    printf("Prog()\n");
     while (getchar() != EOF) {
         Line();
         match('\n');
@@ -684,13 +703,12 @@ void Prog() {
 }
 
 void Line() {
-    printf("Line()\n");
-    match(NUMBER);
+    if (lookahead == NUMBER) {
+        match(NUMBER);
+    }
     Stmts();
 }
-
 void Stmts() {
-    printf("Stmts()\n");
     Stmt();
     if (lookahead == ':') {
         match(':');
@@ -699,7 +717,6 @@ void Stmts() {
 }
 
 void Stmt() {
-    printf("Stmt()\n");
     if (lookahead == REM) {
         match(REM);
     } else if (lookahead == QUOTEREM) {
@@ -886,12 +903,10 @@ void Stmt() {
 }
 
 void Expr() {
-    printf("Expr()\n");
     Expr0();
 }
 
 void Expr0() {
-    printf("Expr0()\n");
     Expr1();
     while (lookahead == AND || lookahead == OR) {
         match(lookahead);
@@ -900,7 +915,6 @@ void Expr0() {
 }
 
 void Expr1() {
-    printf("Expr1()\n");
     Expr2();
     while (lookahead == '=' || lookahead == '<' || lookahead == '>' ||
         lookahead == CMP_LE || lookahead == CMP_GE || lookahead == CMP_NE || lookahead == CMP_HASH) {
@@ -910,16 +924,15 @@ void Expr1() {
 }
 
 void Expr2() {
-    printf("Expr2()\n");
     Expr3();
     while (lookahead == '+' || lookahead == '-' || lookahead == '&') {
         match(lookahead);
+        Node* e2opNode = newNode(lookahead);
         Expr3();
     }
 }
 
 void Expr3() {
-    printf("Expr3()\n");
     Expr4();
     while (lookahead == '*' || lookahead == '/' || lookahead == '^') {
         match(lookahead);
@@ -928,17 +941,13 @@ void Expr3() {
 }
 
 void Expr4() {
-    printf("Expr4()\n");
     if (lookahead == '-' || lookahead == NOT) {
         match(lookahead);
-        Func();
-    } else {
-        Func();
     }
+    Func();
 }
 
 void Func() {
-    printf("Func()\n");
 	/*
     <func> ::= <factor>
     <factor> ::= NUMBER | STRING | <var> | <userfunc> | '(' <expr> ')'
@@ -1008,7 +1017,6 @@ void Func() {
 }
 
 void Factor() {
-    printf("Factor()\n");
     if (lookahead == NUMBER) {
         match(NUMBER);
     } else if (lookahead == STRING) {
@@ -1025,7 +1033,6 @@ void Factor() {
 }
 
 void UserFunc() {
-    printf("UserFunc()\n");
     match(FUNCTION_NAME);
     match('(');
     ExprList();
@@ -1033,7 +1040,6 @@ void UserFunc() {
 }
 
 void Var() {
-    printf("Var()\n");
     if (lookahead == VARIABLE_NAME) {
         match(VARIABLE_NAME);
         if (lookahead == '(') {
@@ -1060,7 +1066,6 @@ void Var() {
 }
 
 void PrintList() {
-    printf("PrintList()\n");
     Expr();
     while (lookahead == ',' || lookahead == ';') {
     	match(lookahead);
@@ -1069,14 +1074,12 @@ void PrintList() {
 }
 
 void PrintSep() {
-    printf("PrintSep()\n");
     if (lookahead == ',' || lookahead == ';') {
         match(lookahead);
     }
 }
 
 void ExprList() {
-    printf("ExprList()\n");
     Expr();
     while (lookahead == ',') {
         match(',');
@@ -1085,14 +1088,12 @@ void ExprList() {
 }
 
 void SliceList() {
-    printf("SliceList()\n");
     Expr();
     match(':');
     Expr();
 }
 
 void VarList() {
-    printf("VarList()\n");
     Var();
     while (lookahead == ',') {
         match(',');
@@ -1101,11 +1102,18 @@ void VarList() {
 }
 
 void NumList() {
-    printf("NumList()\n");
     match(NUMBER);
     while (lookahead == ',') {
         match(',');
         match(NUMBER);
     }
+}
+
+Node* newNode(int nID) {
+	Node* node = (Node*)malloc(sizeof(Node));
+	node->nID = nID;
+	node->val.ival = -1;
+	node->son = node->bro = NULL;
+	return node;
 }
 
