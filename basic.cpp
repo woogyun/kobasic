@@ -115,6 +115,9 @@
 #define DEFSTR 238
 #define DEFINT 239
 #define DEFSNG 240
+#define FUN 241
+#define UMINUS 242
+#define VAR 243
 
 struct _node;
 
@@ -131,32 +134,34 @@ typedef struct _node {
 } Node;
 
 int getToken();
-void printToken(int token);
+void printToken(int);
 FILE* fp = stdin;
-void match(int expected);
+void match(int);
 void Prog();
-void Line();
-void Stmts();
-void Stmt();
-void Expr();
-void Expr0();
-void Expr1();
-void Expr2();
-void Expr3();
-void Expr4();
-void Func();
-void Factor();
-void UserFunc();
-void Var();
-void PrintList();
+Node* Line();
+Node* Stmts();
+Node* Stmt();
+Node* Expr();
+Node* Expr0();
+Node* Expr1();
+Node* Expr2();
+Node* Expr3();
+Node* Expr4();
+Node* Func();
+Node* Factor();
+Node* UserFunc();
+Node* Var();
+Node* PrintList();
 void PrintSep();
-void ExprList();
+Node* ExprList();
 void SliceList();
-void VarList();
+Node* VarList();
 void NumList();
 int lookahead;
 AttrVal attrVal;
 Node* newNode(int);
+void printTree(Node*, int);
+void append(Node*, Node*);
 
 int main(void) {
 	lookahead = getToken();
@@ -221,8 +226,10 @@ int getToken() {
 					for(char* c = buffer; *c = toupper(*c); c++);
 					
 					if (!strcmp(buffer, "REM")) return REM;
+					else if (!strcmp(buffer, "DEF")) return DEF;
 					else if (!strcmp(buffer, "QUOTEREM")) return QUOTEREM;
 					else if (!strcmp(buffer, "BYE")) return BYE;
+					else if (!strcmp(buffer, "CMD")) return CMD;
 					else if (!strcmp(buffer, "CALL")) return CALL;
 					else if (!strcmp(buffer, "CHANGE")) return CHANGE;
 					else if (!strcmp(buffer, "CLS")) return CLS;
@@ -289,7 +296,11 @@ int getToken() {
 					else if (!strcmp(buffer, "SEG")) return SEG;
 					else if (!strcmp(buffer, "SUBSTR")) return SUBSTR;
 					else if (!strcmp(buffer, "FUNCTION_NAME")) return FUNCTION_NAME;
-					else if (!strcmp(buffer, "VARIABLE_NAME")) return VARIABLE_NAME;
+					else if (!strcmp(buffer, "VARIABLE_NAME")) {
+						attrVal.sval = (char*)malloc(strlen(buffer) + 1);
+						strcpy(attrVal.sval, buffer);
+						return VARIABLE_NAME;
+					}
 					else if (!strcmp(buffer, "DOUBLE")) return DOUBLE;
 					else if (!strcmp(buffer, "SINGLE")) return SINGLE;
 					else if (!strcmp(buffer, "INTEGER")) return INTEGER;
@@ -329,6 +340,11 @@ int getToken() {
 					else if (!strcmp(buffer, "DEFDBL")) return DEFDBL;
 					else if (!strcmp(buffer, "CONVERT")) return CONVERT;
 					else if (!strcmp(buffer, "UCASE")) return UCASE;
+					
+					/*
+					else if (!strcmp(buffer, "FUN")) return FUN;
+					else if (!strcmp(buffer, "UMINUS")) return UMINUS;
+					*/
 					else return -1;
 				}
 			}
@@ -352,8 +368,14 @@ void printToken(int token) {
 	else if (token == QUOTEREM) {
 		printf("QUOTEREM");
 	}
+	else if (token == REM) {
+		printf("REM");
+	}
 	else if (token == BYE) {
 		printf("BYE");
+	} 
+	else if (token == CMD) {
+		printf("CMD");
 	}
 	else if (token == CALL) {
 		printf("CALL");
@@ -369,6 +391,9 @@ void printToken(int token) {
 	}
 	else if (token == END) {
 		printf("END");
+	}
+	else if (token == DEF) {
+		printf("DEF");
 	}
 	else if (token == EXIT) {
 		printf("EXIT");
@@ -673,6 +698,17 @@ void printToken(int token) {
 	else if (token == UCASE) {
 	    printf("UCASE");
 	}	
+	else if (token == FUN) {
+	    printf("FUN(");
+		printToken(attrVal.ival);
+		printf(")");
+	}	
+	else if (token == UMINUS) {
+		printf("UMINUS");
+	}
+	else if (token == VAR) {
+		printf("VAR(%s)", attrVal.sval);
+	}
 	else if (token == '\n') {
 		printf("newline");
 	}
@@ -680,8 +716,6 @@ void printToken(int token) {
 }
 
 void match(int expected) {
-	printToken(expected);
-	printf("\n");
     if (lookahead == expected) {
         lookahead = getToken();
     }
@@ -697,263 +731,333 @@ void match(int expected) {
 
 void Prog() {
     while (getchar() != EOF) {
-        Line();
+        printTree(Line(), 0);
         match('\n');
     }
 }
 
-void Line() {
+Node* Line() {
+	Node* node = newNode(0);
     if (lookahead == NUMBER) {
+    	node = newNode(NUMBER);
+    	node->val.ival = attrVal.ival;
         match(NUMBER);
     }
-    Stmts();
-}
-void Stmts() {
-    Stmt();
-    if (lookahead == ':') {
-        match(':');
-        Stmts();
-    }
+    node->son = Stmts();
+    return node;
 }
 
-void Stmt() {
+Node* Stmts() {
+	Node* node;
+    node = Stmt();
+    if (lookahead == ':') {
+        match(':');
+        append(node, Stmts());
+    }
+    return node;
+}
+
+Node* Stmt() {
+	Node* node = newNode(lookahead);
     if (lookahead == REM) {
         match(REM);
     } else if (lookahead == QUOTEREM) {
         match(QUOTEREM);
     } else if (lookahead == BYE) {
         match(BYE);
-    } else if (lookahead == CALL) {
-        match(CALL);
-        Expr();
-    } else if (lookahead == CHANGE) {
-        match(CHANGE);
-        Var();
-        match(TO);
-        Var();
     } else if (lookahead == CLS) {
         match(CLS);
-    } else if (lookahead == CMD) {
+	} else if (lookahead == CMD) {
         match(CMD);
+    } else if (lookahead == POP) {
+        match(POP);
+    } else if (lookahead == CALL) {
+        match(CALL);
+        node->son = Expr();
+    } else if (lookahead == CHANGE) {
+        match(CHANGE);
+        node->son = Var();
+        append(node->son, newNode(TO));
+		match(TO);
+        append(node->son, Var());
     } else if (lookahead == DATA) {
         match(DATA);
-        ExprList();
+        node->son = ExprList();
     } else if (lookahead == DEF) {
-        match(DEF);
-        UserFunc();
+		match(DEF);
+        node->son = UserFunc();
         match('=');
-        Expr();
+        append(node->son, newNode('='));
+        append(node->son, Expr());
     } else if (lookahead == DEFDBL) {
         match(DEFDBL);
-        VarList();
+        node->son = VarList();
     } else if (lookahead == DEFINT) {
         match(DEFINT);
-        VarList();
+        node->son = VarList();
     } else if (lookahead == DEFSNG) {
         match(DEFSNG);
-        VarList();
+        node->son =VarList();
     } else if (lookahead == DEFSTR) {
         match(DEFSTR);
-        VarList();
+        node->son = VarList();
     } else if (lookahead == DIM) {
         match(DIM);
-        VarList();
+        node->son = VarList();
     } else if (lookahead == END) {
         match(END);
     } else if (lookahead == EXIT) {
         match(EXIT);
-    } else if (lookahead == FOR) {
+    } else if (lookahead == FOR) {  	
         match(FOR);
-        Var();
+        node->son = Var();
+        append(node->son, newNode('='));
         match('=');
-        Expr();
+        append(node->son, Expr());
+        append(node->son, newNode(TO));
         match(TO);
-        Expr();
+        append(node->son, Expr());
         if (lookahead == STEP) {
+        	append(node->son, newNode(STEP));
             match(STEP);
-            Expr();
-        }
+            append(node->son, Expr());
+		}
     } else if (lookahead == GOSUB) {
         match(GOSUB);
         if (lookahead == NUMBER) {
+        	node->son = newNode(NUMBER);
+			node->son->val.ival = attrVal.ival;
             match(NUMBER);
         } else {
-            Expr();
+            node->son = Expr();
             if (lookahead == OF) {
-                match(OF);
-                ExprList();
+                append(node->son, newNode(OF));
+				match(OF);
+                append(node->son, ExprList());
             }
         }
     } else if (lookahead == GOTO) {
         match(GOTO);
         if (lookahead == NUMBER) {
+        	node->son = newNode(NUMBER);
+        	node->son->val.ival = attrVal.ival;
             match(NUMBER);
         } else {
-            Expr();
+            node->son = Expr();
             if (lookahead == OF) {
-                match(OF);
-                ExprList();
+                append(node->son, newNode(OF));
+				match(OF);
+                append(node->son, ExprList());
             }
         }
     } else if (lookahead == INPUT) {
         match(INPUT);
-        PrintList();
+        node->son = PrintList();
     } else if (lookahead == IF) {
         match(IF);
-        Expr();
+        node->son = Expr();
         if (lookahead == THEN) {
+        	append(node->son, newNode(THEN));
             match(THEN);
             if (lookahead == NUMBER) {
+            	append(node->son, newNode(NUMBER));
                 match(NUMBER);
             } else {
-                Stmts();
+                append(node->son, Stmts());
             }
         } else if (lookahead == GOTO) {
+    		append(node->son, newNode(GOTO));
+    		Node* tmp = node->son;
             match(GOTO);
+            append(node->son, newNode(NUMBER));
+            for(; tmp->bro; tmp = tmp->bro);
+        	tmp->val.ival = attrVal.ival;
             match(NUMBER);
         }
     } else if (lookahead == LET) {
         match(LET);
-        Var();
+        if (lookahead == TIME_STR) {
+        	match(TIME_STR);
+	        node->son = newNode(TIME_STR);
+	        match('=');
+	        append(node->son, newNode('='));
+	        append(node->son, Expr());
+		} else {
+        node->son = Var();
         match('=');
-        Expr();
+        append(node->son, newNode('='));
+        append(node->son, Expr());
+    	}
     } else if (lookahead == NEXT) {
         match(NEXT);
-        if (lookahead != ',') {
-            VarList();
+        if (lookahead == VARIABLE_NAME) {
+            node->son = VarList();
         }
     } else if (lookahead == NEW) {
         match(NEW);
     } else if (lookahead == ON) {
         match(ON);
-        Expr();
+        node->son = Expr();
         if (lookahead == GOTO) {
             match(GOTO);
-            ExprList();
+            append(node->son, newNode(GOTO));
+            append(node->son, ExprList());
         } else if (lookahead == GOSUB) {
             match(GOSUB);
-            ExprList();
+            append(node->son, newNode(GOSUB));
+            append(node->son, ExprList());
         }
     } else if (lookahead == OPTION) {
         match(OPTION);
         match(BASE);
-        Expr();
+        node->son = newNode(BASE);
+        append(node->son, Expr());
     } else if (lookahead == POKE) {
         match(POKE);
-        Expr();
+        node->son = Expr();
         match(',');
-        Expr();
-    } else if (lookahead == POP) {
-        match(POP);
+        append(node->son, Expr());
     } else if (lookahead == PRINT) {
         match(PRINT);
         if (lookahead == USING) {
+        	node->son = newNode(USING);
             match(USING);
-            Expr();
+            append(node->son, Expr());
             match(';');
-            PrintList();
+            append(node->son, PrintList());
         } else {
-            PrintList();
+            node->son = PrintList();
         }
     } else if (lookahead == RANDOMIZE) {
         match(RANDOMIZE);
-        if (lookahead != ',') {
-            Expr();
+        if (lookahead != '\n') {
+            node->son = Expr();
         }
     } else if (lookahead == READ) {
         match(READ);
-        VarList();
+        node->son = VarList();
     } else if (lookahead == RESTORE) {
         match(RESTORE);
-        if (lookahead != ',') {
-            Expr();
+        if (lookahead != '\n') {
+            node->son = Expr();
         }
     } else if (lookahead == RETURN) {
         match(RETURN);
     } else if (lookahead == STOP) {
         match(STOP);
-        if (lookahead != ',') {
-            Expr();
+        if (lookahead != '\n') {
+            node->son = Expr();
         }
-    } else if (lookahead == STRING) {
+    } else if (lookahead == STRING) { 
+    	node->val.sval = attrVal.sval;
         match(STRING);
-        Expr();
+        node->son = Expr();
     } else if (lookahead == SYS) {
         match(SYS);
-        Expr();
+        node->son = Expr();
     } else if (lookahead == TIME_STR) {
         match(TIME_STR);
         match('=');
-        Expr();
-    } else if (lookahead == LET) {
-        match(LET);
-        match(TIME_STR);
-        match('=');
-        Expr();
+        node->son = newNode('='); 
+        append(node->son, Expr());
     } else if (lookahead == VARLIST) {
         match(VARLIST);
     } else if (lookahead == WAIT) {
         match(WAIT);
-        Expr();
+        node->son = Expr();
     } else {
-        Var();
+        node = Var();
         match('=');
-        Expr();
+        node->son = newNode('=');
+    	append(node->son, Expr());
     }
+    return node;
 }
 
-void Expr() {
-    Expr0();
+Node* Expr() {
+	return Expr0();
 }
 
-void Expr0() {
-    Expr1();
+Node* Expr0() {
+	Node* left;
+	Node* node;
+	
+    left = Expr1();
     while (lookahead == AND || lookahead == OR) {
+        node = newNode(lookahead);
         match(lookahead);
-        Expr1();
+        node->son = left;
+        append(left, Expr1());
+        left = node;
     }
+    return left;
 }
 
-void Expr1() {
-    Expr2();
+Node* Expr1() {
+	Node* left;
+	Node* node;
+	
+    left = Expr2();
     while (lookahead == '=' || lookahead == '<' || lookahead == '>' ||
         lookahead == CMP_LE || lookahead == CMP_GE || lookahead == CMP_NE || lookahead == CMP_HASH) {
+        node = newNode(lookahead);
         match(lookahead);
-        Expr2();
+        node->son = left;
+        append(left, Expr2());
+        left = node;
     }
+    return left;
 }
 
-void Expr2() {
-    Expr3();
+Node* Expr2() {
+    Node* left;
+	Node* node;
+	
+    left = Expr3();
     while (lookahead == '+' || lookahead == '-' || lookahead == '&') {
+        node = newNode(lookahead);
         match(lookahead);
-        Node* e2opNode = newNode(lookahead);
-        Expr3();
+        node->son = left;
+        append(left, Expr3());
+        left = node;
     }
+    return left;
 }
 
-void Expr3() {
-    Expr4();
+Node* Expr3() {
+    Node* left;
+    Node* node;
+	
+    left = Expr4();
+
     while (lookahead == '*' || lookahead == '/' || lookahead == '^') {
+        node = newNode(lookahead);
         match(lookahead);
-        Expr4();
+        node->son = left;
+        append(left, Expr4());
+        left = node;
     }
+    return left;
 }
 
-void Expr4() {
+Node* Expr4() {
     if (lookahead == '-' || lookahead == NOT) {
+    	Node* node = newNode(UMINUS);
+    	node->val.ival = lookahead;
         match(lookahead);
+        node->son = Expr();
+        return node;
     }
-    Func();
+    return Func();
 }
 
-void Func() {
+Node* Func() {
 	/*
     <func> ::= <factor>
     <factor> ::= NUMBER | STRING | <var> | <userfunc> | '(' <expr> ')'
     */
     if (lookahead == NUMBER || lookahead == STRING || lookahead == VARIABLE_NAME || lookahead == FUNCTION_NAME || lookahead == '(') {
-    	Factor();
+    	return Factor();
 	}
 	
 	/* 
@@ -962,29 +1066,33 @@ void Func() {
 			| <fn0> '(' <expr> ')'
 	*/
 	else if (lookahead == FRE || lookahead == RND || lookahead == TIME || lookahead == TIME_STR) {
+		Node* node = newNode(FUN);
+		node->val.ival = lookahead;
 		match(lookahead);
 		match('(');
-		if(lookahead == ')') {
-			match(')');
+		if(lookahead != ')') {
+			node->son = Expr();
 		}
-		else {
-			Expr();
-			match(')');
-		}
+		match(')');
+		return node;
 	}
 	
 	/*
-	<fn1> ::= ABS | ATN | CHR | CLOG | COS | EXP | FIX 
-	| INT | LCASE | LEN | LIN | STR | LOG | PEEK | SGN
+	<fn1> ::= ABS | ATN | CHR | CLOG | COS | EXP | FIX | INT | LCASE | LEN | LIN | STR | LOG | PEEK | SGN | SIN | SPC | SQR | TAB | VAL | UCASE | USR 
 	<func> ::= <fn1> '(' <expr> ')'
 	
 	*/
 	else if (lookahead == ABS || lookahead == ATN || lookahead == CHR || lookahead == CLOG || lookahead == COS || lookahead == EXP || lookahead == FIX 
-	|| lookahead == INT || lookahead == LCASE || lookahead == LEN || lookahead == LIN || lookahead == STR || lookahead == LOG || lookahead == PEEK || lookahead == SGN) {
+	|| lookahead == INT || lookahead == LCASE || lookahead == LEN || lookahead == LIN || lookahead == STR || lookahead == LOG || lookahead == PEEK || lookahead == SGN
+	|| lookahead == SIN || lookahead == SPC || lookahead == SQR || lookahead == TAB || lookahead == VAL || lookahead == UCASE || lookahead == USR) {
+		Node* node = newNode(FUN);
+		node->val.ival = lookahead;
     	match(lookahead);
     	match('(');
-    	Expr();
+		node->son = Expr();
+		newNode(lookahead);
     	match(')');
+    	return node;
 	}
 	
 	/*
@@ -992,12 +1100,15 @@ void Func() {
 	<func> ::= <fn2> '(' <expr> ',' <expr> ')'
 	*/
 	else if (lookahead == LEFT || lookahead == RIGHT || lookahead == STRNG) {
+		Node* node = newNode(FUN);
+		node->val.ival = lookahead;
 		match(lookahead);
 		match('(');
-		Expr();
+		node->son = Expr();
 		match(',');
-		Expr();
+		append(node->son, Expr());
 		match(')');
+		return node;
 	}
 	
 	/*
@@ -1005,41 +1116,55 @@ void Func() {
 	<func> ::= <fnx> '(' <expr> ',' <expr> ',' <expr> ')'
 	*/
 	else if (lookahead == MID || lookahead == SEG || lookahead == SUBSTR) {
+		Node* node = newNode(FUN);
+		node->val.ival = lookahead;
 		match(lookahead);
 		match('(');
-		Expr();
+		node->son = Expr();
 		match(',');
-		Expr();
+		append(node->son, Expr());
 		match(',');
-		Expr();
+		append(node->son, Expr());
 		match(')');
+		return node;
 	}
 }
 
-void Factor() {
+Node* Factor() {
+	Node* node;
     if (lookahead == NUMBER) {
+    	node = newNode(lookahead);
+    	node->val.ival = attrVal.ival;
         match(NUMBER);
     } else if (lookahead == STRING) {
+    	node = newNode(lookahead);
+    	node->val.sval = attrVal.sval;
         match(STRING);
     } else if (lookahead == VARIABLE_NAME) {
-        Var();
+        node = Var();
     } else if (lookahead == FUNCTION_NAME) {
-        UserFunc();
+        node = UserFunc();
     } else if (lookahead == '(') {
         match('(');
-        Expr();
-        match(')');
+        node = Expr();
+		match(')');
     }
+    return node;
 }
 
-void UserFunc() {
+Node* UserFunc() {
+	Node* node = newNode(FUN);
+	node->val.ival = FUNCTION_NAME;
     match(FUNCTION_NAME);
     match('(');
-    ExprList();
+	node->son = ExprList();
     match(')');
+    return node;
 }
 
-void Var() {
+Node* Var() {
+	Node* node = newNode(VAR);
+	node->val.ival = attrVal.ival;
     if (lookahead == VARIABLE_NAME) {
         match(VARIABLE_NAME);
         if (lookahead == '(') {
@@ -1063,28 +1188,33 @@ void Var() {
             match(')');
         }
     }
+    return node;
 }
 
-void PrintList() {
-    Expr();
-    while (lookahead == ',' || lookahead == ';') {
+/*
+<printlist> ::= <expr>
+	| <printlist> <expr>
+	| <printsep>
+	| <printlist> <printsep>
+*/
+Node* PrintList() {
+    Node* node;
+	node = Expr();
+    while(lookahead == ',' || lookahead == ';') {
     	match(lookahead);
-    	Expr();
+    	append(node, Expr());
 	}
+	return node;
 }
 
-void PrintSep() {
-    if (lookahead == ',' || lookahead == ';') {
-        match(lookahead);
-    }
-}
-
-void ExprList() {
-    Expr();
+Node* ExprList() {
+    Node* node;
+	node = Expr();
     while (lookahead == ',') {
         match(',');
-        Expr();
+        append(node, Expr());
     }
+    return node;
 }
 
 void SliceList() {
@@ -1093,12 +1223,14 @@ void SliceList() {
     Expr();
 }
 
-void VarList() {
-    Var();
+Node* VarList() {
+	Node* node;
+    node = Var();
     while (lookahead == ',') {
         match(',');
-        Var();
+        append(node, Var());
     }
+    return node;
 }
 
 void NumList() {
@@ -1113,7 +1245,29 @@ Node* newNode(int nID) {
 	Node* node = (Node*)malloc(sizeof(Node));
 	node->nID = nID;
 	node->val.ival = -1;
-	node->son = node->bro = NULL;
+	node->son = NULL;
+	node->bro = NULL;
 	return node;
 }
 
+void printTree(Node *node, int depth) {
+	int i;
+	if (node == NULL) {
+		return;
+	}
+	for (i = 0; i < depth; i++) {
+		printf("  ");
+	}
+	attrVal.ival = node->val.ival;
+	printToken(node->nID);
+	printf("\n");
+	printTree(node->son, depth + 1);
+	printTree(node->bro, depth);
+}
+
+void append(Node *head, Node *elmt) {
+	Node* tmp = head;
+	for(; head->bro; head = head->bro);
+	head->bro = elmt;
+	head = tmp;
+} 
