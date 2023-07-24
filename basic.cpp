@@ -135,7 +135,7 @@ typedef struct _node {
 
 int getToken();
 void printToken(int);
-FILE* fp = stdin;
+FILE* fp;
 void match(int);
 void Prog();
 Node* Line();
@@ -164,6 +164,8 @@ void printTree(Node*, int);
 void append(Node*, Node*);
 
 int main(void) {
+	fp = fopen("fin.txt", "r");
+	if (!fp) return -1;
 	lookahead = getToken();
 	Prog();
 	return 0;
@@ -172,14 +174,14 @@ int main(void) {
 int getToken() {
 	char c, buffer[MAXLEN];
 	int i = 0;
-	while (c = getchar()) {
+	while (c = fgetc(fp)) {
 		if (c == '\n') return '\n';
 		if (isspace(c)) continue;
 		
 		// number token
 		if (isdigit(c)) {
 			buffer[i++] = c;
-			while (c = getchar()) {
+			while (c = fgetc(fp)) {
 				if (isdigit(c)) {
 					
 					buffer[i++] = c;
@@ -197,7 +199,7 @@ int getToken() {
 		
 		// stirng token
 		if (c == '"') {
-			while (c = getchar()) {
+			while (c = fgetc(fp)) {
 				if (c != '"') {
 					buffer[i++] = c;					
 				}
@@ -214,7 +216,7 @@ int getToken() {
 		// otherwise
 		if (isalpha(c)) {
 			buffer[i++] = c;
-			while (c = getchar()) {
+			while (c = fgetc(fp)) {
 				if (isalpha(c) || c == '_') {
 					buffer[i++] = c;
 				}
@@ -730,9 +732,10 @@ void match(int expected) {
 }
 
 void Prog() {
-    while (getchar() != EOF) {
+    while (fgetc(fp) != EOF) {
         printTree(Line(), 0);
-        match('\n');
+        if(lookahead = '\n')
+        	match('\n');
     }
 }
 
@@ -1192,7 +1195,8 @@ Node* Var() {
 }
 
 /*
-<printlist> ::= <expr>
+<printlist> ::= <empty>
+	| <expr>
 	| <printlist> <expr>
 	| <printsep>
 	| <printlist> <printsep>
@@ -1200,9 +1204,12 @@ Node* Var() {
 Node* PrintList() {
     Node* node;
 	node = Expr();
+	while (isalnum(lookahead)) {
+		append(node, Expr());
+	}
     while(lookahead == ',' || lookahead == ';') {
+    	append(node, newNode(lookahead));
     	match(lookahead);
-    	append(node, Expr());
 	}
 	return node;
 }
