@@ -1,6 +1,8 @@
 #include <iostream>
 #include <string.h>
 #include <stdlib.h>
+#include <map>
+#include <vector>
 
 #define MAXLEN 100
 
@@ -15,7 +17,7 @@
 #define DATA 138
 #define DEF 139
 #define END 140
-#define	EXIT 141
+#define EXIT 141
 #define FOR 142
 #define TO 143
 #define GOSUB 144
@@ -75,8 +77,8 @@
 #define MID 198
 #define SEG 199
 #define SUBSTR 200
-#define FUNCTION_NAME 201
-#define VARIABLE_NAME 202
+#define VARIABLE_NAME 201
+#define FUNCTION_NAME 202
 #define DOUBLE 203
 #define SINGLE 204
 #define INTEGER 205
@@ -118,13 +120,26 @@
 #define FUN 241
 #define UMINUS 242
 #define VAR 243
+#define CLO 244
+#define NUM_FUNCTIONS 32
+
+using namespace std;
 
 struct _node;
 
-typedef union _AttrVal{
-	int ival;
-	char* sval;
-	struct _node* pval;
+const string functionNames[NUM_FUNCTIONS] = {
+    "FRE", "RND", "TIME", "TIME_STR", "ABS", "ATN", "CHR", "CLOG", "COS", "EXP", "FIX", "INT",
+    "LCASE", "LEN", "LIN", "STR", "LOG", "PEEK", "SGN", "SIN", "SPC", "SQR", "TAB", "VAL",
+    "UCASE", "USR", "LEFT", "RIGHT", "STRNG", "MID", "SEG", "SUBSTR"
+};
+
+typedef struct _AttrVal{
+	int tag;
+	union {
+		int ival;
+		char* sval;
+		struct _node* pval;
+	};
 } AttrVal;
 
 typedef struct _node {
@@ -133,6 +148,7 @@ typedef struct _node {
 	struct _node *son, *bro; 
 } Node;
 
+map<string, AttrVal> tab;
 int getToken();
 void printToken(int);
 FILE* fp;
@@ -162,12 +178,30 @@ AttrVal attrVal;
 Node* newNode(int);
 void printTree(Node*, int);
 void append(Node*, Node*);
+void traverse(Node*);
+void printEnv();
+map<string, AttrVal> funList;
+AttrVal mkInt(int);
+AttrVal mkStr(char*);
+AttrVal mkClo(Node*);
+AttrVal mkVar(char*);
+AttrVal mkFun(char*);
+bool isFN(char*);
+string getFunctionName(int);
+void setFunList();
+void printFunList();
+map<string, AttrVal> merge(map<string, AttrVal>, map<string, AttrVal>);
+void addToEnv(Node*);
 
 int main(void) {
 	fp = fopen("fin.txt", "r");
-	if (!fp) return -1;
+	if (!fp) fp = stdin;
+
 	lookahead = getToken();
 	Prog();
+	
+	printEnv();
+	printFunList();
 	return 0;
 }
 
@@ -178,14 +212,11 @@ int getToken() {
 		if (c == '\n') return '\n';
 		if (isspace(c)) continue;
 		
-		// number token
 		if (isdigit(c)) {
 			buffer[i++] = c;
 			while (c = fgetc(fp)) {
 				if (isdigit(c)) {
-					
 					buffer[i++] = c;
-					
 				}
 				else {
 					ungetc(c, fp);
@@ -193,11 +224,10 @@ int getToken() {
 					break;
 				}
 			}
-			attrVal.ival = atoi(buffer);
+			attrVal = mkInt(atoi(buffer));
 			return NUMBER;
 		}
 		
-		// stirng token
 		if (c == '"') {
 			while (c = fgetc(fp)) {
 				if (c != '"') {
@@ -208,23 +238,19 @@ int getToken() {
 					break;
 				}
 			}
-			attrVal.sval = (char*)malloc(strlen(buffer) + 1);
-			strcpy(attrVal.sval, buffer);
+			attrVal = mkStr(buffer);
 			return STRING;
 		}
-		
-		// otherwise
+
 		if (isalpha(c)) {
 			buffer[i++] = c;
 			while (c = fgetc(fp)) {
-				if (isalpha(c) || c == '_') {
+				if (isalpha(c) || c == '_' || isdigit(c)) {
 					buffer[i++] = c;
 				}
 				else {
 					ungetc(c, fp);
 					buffer[i] = '\0';
-					
-					// to upper
 					for(char* c = buffer; *c = toupper(*c); c++);
 					
 					if (!strcmp(buffer, "REM")) return REM;
@@ -297,12 +323,6 @@ int getToken() {
 					else if (!strcmp(buffer, "MID")) return MID;
 					else if (!strcmp(buffer, "SEG")) return SEG;
 					else if (!strcmp(buffer, "SUBSTR")) return SUBSTR;
-					else if (!strcmp(buffer, "FUNCTION_NAME")) return FUNCTION_NAME;
-					else if (!strcmp(buffer, "VARIABLE_NAME")) {
-						attrVal.sval = (char*)malloc(strlen(buffer) + 1);
-						strcpy(attrVal.sval, buffer);
-						return VARIABLE_NAME;
-					}
 					else if (!strcmp(buffer, "DOUBLE")) return DOUBLE;
 					else if (!strcmp(buffer, "SINGLE")) return SINGLE;
 					else if (!strcmp(buffer, "INTEGER")) return INTEGER;
@@ -342,12 +362,14 @@ int getToken() {
 					else if (!strcmp(buffer, "DEFDBL")) return DEFDBL;
 					else if (!strcmp(buffer, "CONVERT")) return CONVERT;
 					else if (!strcmp(buffer, "UCASE")) return UCASE;
-					
-					/*
-					else if (!strcmp(buffer, "FUN")) return FUN;
-					else if (!strcmp(buffer, "UMINUS")) return UMINUS;
-					*/
-					else return -1;
+					attrVal.sval = (char*)malloc(strlen(buffer) + 1);
+					strcpy(attrVal.sval, buffer);
+					if (isFN(buffer)) {
+						return FUNCTION_NAME;
+					}
+					else {
+						return VARIABLE_NAME;
+					}
 				}
 			}
 		}
@@ -358,7 +380,10 @@ int getToken() {
 }
 
 void printToken(int token) {
-	if (token == -1) {
+	if (!token) {
+		;
+	}
+	else if (token == -1) {
 		printf("Not A Token");
 	}
 	else if (token == STRING) {
@@ -577,9 +602,6 @@ void printToken(int token) {
 	else if (token == SUBSTR) {
 	    printf("SUBSTR");
 	}
-	else if (token == FUNCTION_NAME) {
-	    printf("FUNCTION_NAME");
-	}
 	else if (token == VARIABLE_NAME) {
 	    printf("VARIABLE_NAME");
 	}
@@ -701,9 +723,7 @@ void printToken(int token) {
 	    printf("UCASE");
 	}	
 	else if (token == FUN) {
-	    printf("FUN(");
-		printToken(attrVal.ival);
-		printf(")");
+	    printf("FUN(%s)", attrVal.sval);
 	}	
 	else if (token == UMINUS) {
 		printf("UMINUS");
@@ -732,8 +752,12 @@ void match(int expected) {
 }
 
 void Prog() {
+	setFunList();
+	tab = merge(tab, funList);
     while (fgetc(fp) != EOF) {
-        printTree(Line(), 0);
+    	Node* line;
+    	traverse(line = Line());
+    	printTree(line, 0);
         if(lookahead = '\n')
         	match('\n');
     }
@@ -743,7 +767,7 @@ Node* Line() {
 	Node* node = newNode(0);
     if (lookahead == NUMBER) {
     	node = newNode(NUMBER);
-    	node->val.ival = attrVal.ival;
+    	node->val = mkInt(attrVal.ival); 
         match(NUMBER);
     }
     node->son = Stmts();
@@ -780,7 +804,6 @@ Node* Stmt() {
     } else if (lookahead == CHANGE) {
         match(CHANGE);
         node->son = Var();
-        append(node->son, newNode(TO));
 		match(TO);
         append(node->son, Var());
     } else if (lookahead == DATA) {
@@ -789,9 +812,14 @@ Node* Stmt() {
     } else if (lookahead == DEF) {
 		match(DEF);
         node->son = UserFunc();
+        string functionName = string(node->son->val.sval);
+        AttrVal val;
+        val.tag = FUN;
+        val.pval = node->son;
+        funList[functionName] = val;
+		tab[functionName] = val; 
         match('=');
-        append(node->son, newNode('='));
-        append(node->son, Expr());
+        append(node->son->son, Expr());
     } else if (lookahead == DEFDBL) {
         match(DEFDBL);
         node->son = VarList();
@@ -814,7 +842,6 @@ Node* Stmt() {
     } else if (lookahead == FOR) {  	
         match(FOR);
         node->son = Var();
-        append(node->son, newNode('='));
         match('=');
         append(node->son, Expr());
         append(node->son, newNode(TO));
@@ -881,16 +908,17 @@ Node* Stmt() {
         match(LET);
         if (lookahead == TIME_STR) {
         	match(TIME_STR);
-	        node->son = newNode(TIME_STR);
 	        match('=');
-	        append(node->son, newNode('='));
-	        append(node->son, Expr());
+	        node->son = newNode('=');
+	        node->son->son = newNode(TIME_STR);
+	        append(node->son->son, Expr());
 		} else {
-        node->son = Var();
+        node->son = newNode('=');
+        node->son->son = Var();
         match('=');
-        append(node->son, newNode('='));
-        append(node->son, Expr());
+        append(node->son->son, Expr());
     	}
+    	addToEnv(node->son);
     } else if (lookahead == NEXT) {
         match(NEXT);
         if (lookahead == VARIABLE_NAME) {
@@ -953,6 +981,7 @@ Node* Stmt() {
         }
     } else if (lookahead == STRING) { 
     	node->val.sval = attrVal.sval;
+    	node->val.tag = STRING;
         match(STRING);
         node->son = Expr();
     } else if (lookahead == SYS) {
@@ -961,18 +990,21 @@ Node* Stmt() {
     } else if (lookahead == TIME_STR) {
         match(TIME_STR);
         match('=');
-        node->son = newNode('='); 
+        node = newNode('=');
+	    node->son = newNode(TIME_STR);
         append(node->son, Expr());
+        addToEnv(node);
     } else if (lookahead == VARLIST) {
         match(VARLIST);
     } else if (lookahead == WAIT) {
         match(WAIT);
         node->son = Expr();
     } else {
-        node = Var();
+        node = newNode('=');
+        node->son = Var();
         match('=');
-        node->son = newNode('=');
-    	append(node->son, Expr());
+        append(node->son, Expr());
+        addToEnv(node);
     }
     return node;
 }
@@ -1089,11 +1121,12 @@ Node* Func() {
 	|| lookahead == INT || lookahead == LCASE || lookahead == LEN || lookahead == LIN || lookahead == STR || lookahead == LOG || lookahead == PEEK || lookahead == SGN
 	|| lookahead == SIN || lookahead == SPC || lookahead == SQR || lookahead == TAB || lookahead == VAL || lookahead == UCASE || lookahead == USR) {
 		Node* node = newNode(FUN);
-		node->val.ival = lookahead;
+		char *fname = const_cast<char*>(getFunctionName(lookahead).c_str());
+		node->val.sval = (char *) malloc(strlen(fname) + 1);
+		strcpy(node->val.sval, fname);
     	match(lookahead);
     	match('(');
 		node->son = Expr();
-		newNode(lookahead);
     	match(')');
     	return node;
 	}
@@ -1104,7 +1137,9 @@ Node* Func() {
 	*/
 	else if (lookahead == LEFT || lookahead == RIGHT || lookahead == STRNG) {
 		Node* node = newNode(FUN);
-		node->val.ival = lookahead;
+		char *fname = const_cast<char*>(getFunctionName(lookahead).c_str());
+		node->val.sval = (char *) malloc(strlen(fname) + 1);
+		strcpy(node->val.sval, fname);
 		match(lookahead);
 		match('(');
 		node->son = Expr();
@@ -1120,7 +1155,9 @@ Node* Func() {
 	*/
 	else if (lookahead == MID || lookahead == SEG || lookahead == SUBSTR) {
 		Node* node = newNode(FUN);
-		node->val.ival = lookahead;
+		char *fname = const_cast<char*>(getFunctionName(lookahead).c_str());
+		node->val.sval = (char *) malloc(strlen(fname) + 1);
+		strcpy(node->val.sval, fname);
 		match(lookahead);
 		match('(');
 		node->son = Expr();
@@ -1138,10 +1175,12 @@ Node* Factor() {
     if (lookahead == NUMBER) {
     	node = newNode(lookahead);
     	node->val.ival = attrVal.ival;
+    	node->val.tag = INT;
         match(NUMBER);
     } else if (lookahead == STRING) {
     	node = newNode(lookahead);
     	node->val.sval = attrVal.sval;
+    	node->val.tag = STRING;
         match(STRING);
     } else if (lookahead == VARIABLE_NAME) {
         node = Var();
@@ -1157,7 +1196,8 @@ Node* Factor() {
 
 Node* UserFunc() {
 	Node* node = newNode(FUN);
-	node->val.ival = FUNCTION_NAME;
+	node->val.sval = attrVal.sval;
+	node->val.tag = FUN;
     match(FUNCTION_NAME);
     match('(');
 	node->son = ExprList();
@@ -1167,7 +1207,8 @@ Node* UserFunc() {
 
 Node* Var() {
 	Node* node = newNode(VAR);
-	node->val.ival = attrVal.ival;
+	node->val.sval = attrVal.sval;
+	node->val.tag = VAR;
     if (lookahead == VARIABLE_NAME) {
         match(VARIABLE_NAME);
         if (lookahead == '(') {
@@ -1175,7 +1216,7 @@ Node* Var() {
             ExprList();
             match(')');
         } else if (lookahead == '[') {
-            match('[');
+            match('['); 
             ExprList();
             match(']');
         } else if (lookahead == '(') {
@@ -1194,22 +1235,17 @@ Node* Var() {
     return node;
 }
 
-/*
-<printlist> ::= <empty>
-	| <expr>
-	| <printlist> <expr>
-	| <printsep>
-	| <printlist> <printsep>
-*/
 Node* PrintList() {
-    Node* node;
-	node = Expr();
-	while (isalnum(lookahead)) {
-		append(node, Expr());
-	}
-    while(lookahead == ',' || lookahead == ';') {
-    	append(node, newNode(lookahead));
-    	match(lookahead);
+	Node* node = newNode(0);
+	while (true) {
+		if (lookahead == EOF || lookahead == '\n') {
+			break;
+		}
+	    if (lookahead == ',' || lookahead == ';') {
+	    	append(node, newNode(lookahead));
+	    	match(lookahead);
+		}
+		else append(node, Expr());
 	}
 	return node;
 }
@@ -1251,7 +1287,8 @@ void NumList() {
 Node* newNode(int nID) {
 	Node* node = (Node*)malloc(sizeof(Node));
 	node->nID = nID;
-	node->val.ival = -1;
+	node->val.pval = node;
+	node->val.tag = CLO;
 	node->son = NULL;
 	node->bro = NULL;
 	return node;
@@ -1263,11 +1300,13 @@ void printTree(Node *node, int depth) {
 		return;
 	}
 	for (i = 0; i < depth; i++) {
+		if(node->nID == 0) break;
 		printf("  ");
 	}
-	attrVal.ival = node->val.ival;
-	printToken(node->nID);
-	printf("\n");
+	int token = node->nID; 
+	attrVal = node->val;
+	printToken(token);
+	if(node->nID) printf("\n");
 	printTree(node->son, depth + 1);
 	printTree(node->bro, depth);
 }
@@ -1278,3 +1317,159 @@ void append(Node *head, Node *elmt) {
 	head->bro = elmt;
 	head = tmp;
 } 
+
+void traverse(Node* node) {
+	if (node == NULL) return;
+	/*
+	if (node->nID == '=') {
+		if (node->bro) {
+			if (node->bro->nID == THEN || node->bro->nID == GOTO) return;
+		}
+		if (node->son) {
+			if (node->son->val.tag == VAR) {
+				char* tmp = node->son->val.sval;
+				string name(tmp);
+				if (tab.find(name) == tab.end()) {
+					tab[name] = node->son->bro->val;
+				}
+			}
+		}
+	}
+	*/
+	traverse(node->son);
+	traverse(node->bro);
+}
+
+void printEnv() {
+	cout << endl << endl;
+	cout << "---------env-----------" << endl;
+	map<string, AttrVal> m = tab;
+	map<string, AttrVal>::iterator iter;
+	for (iter = m.begin(); iter != m.end(); iter++) {
+		AttrVal v = iter->second;
+		if (v.tag == INT) {
+			cout << iter->first << ": (INT, " << v.ival << ")" <<endl;
+		}
+		else if (v.tag == STRING) {
+			cout << iter->first << ": (STR, " << v.sval << ")" <<endl;
+		}
+		else if (v.tag == CLO) {
+			cout << iter->first << ": (CLO, ";
+			printToken(v.pval->nID); 
+			cout << ")" << endl;
+			printTree(v.pval, 0);
+		}
+		else if (v.tag == FUN) {
+			cout << iter->first << ": (FUN, ";
+			if(!v.pval) cout << "NULL)\n";
+			else {
+				Node* node = v.pval;
+				printf("%s)\n", node->val.sval);
+				printTree(v.pval, 1);
+			}
+		}
+	}
+	cout << "-----------------------" << endl;
+}
+
+AttrVal mkInt(int i) {
+	AttrVal val;
+	val.ival = i;
+	val.tag = INT;
+	return val;
+}
+
+AttrVal mkStr(char* c) {
+	AttrVal val;
+	val.sval = (char*)malloc(strlen(c) + 1);
+	strcpy(val.sval, c);
+	val.tag = STRING;
+	return val;
+}
+
+AttrVal mkClo(Node* n) {
+	AttrVal val;
+	val.pval = n;
+	val.tag = CLO;
+	return val;
+}
+
+bool isFN(char* name) {
+	string fn = string(name);
+	if (funList.find(fn) != funList.end() || lookahead == DEF) return true;
+	return false;
+}
+
+string getFunctionName(int fn) {
+	if (fn == FRE) return "FRE";
+	if (fn == RND) return "RND";
+	if (fn == TIME) return "TIME";
+	if (fn == TIME_STR) return "TIME_STR";
+	if (fn == ABS) return "ABS";
+	if (fn == ATN) return "ATN";
+	if (fn == CHR) return "CHR";
+	if (fn == CLOG) return "CLOG";
+	if (fn == COS) return "COS";
+	if (fn == EXP) return "EXP";
+	if (fn == FIX) return "FIX";
+	if (fn == INT) return "INT";
+	if (fn == LCASE) return "LCASE";
+	if (fn == LEN) return "LEN";
+	if (fn == LIN) return "LIN";
+	if (fn == STR) return "STR";
+	if (fn == LOG) return "LOG";
+	if (fn == PEEK) return "PEEK";
+	if (fn == SGN) return "SGN";
+	if (fn == SIN) return "SIN";
+	if (fn == SPC) return "SPC";
+	if (fn == SQR) return "SQR";
+	if (fn == TAB) return "TAB";
+	if (fn == VAL) return "VAL";
+	if (fn == UCASE) return "UCASE";
+	if (fn == USR) return "USR";
+	if (fn == LEFT) return "LEFT";
+	if (fn == RIGHT) return "RIGHT";
+	if (fn == STRNG) return "STRNG";
+	if (fn == MID) return "MID";
+	if (fn == SEG) return "SEG";
+	if (fn == SUBSTR) return "SUBSTR";
+}
+
+void setFunList() {
+	AttrVal tmp;
+	tmp.tag = FUN;
+	tmp.pval = NULL;
+	for (int i = 0; i < NUM_FUNCTIONS; i++) {
+        funList[functionNames[i]] = tmp;
+    }
+}
+
+void printFunList() {
+	cout << endl << endl;
+	cout << "------functionList-----" << endl;
+	map<string, AttrVal> m = funList;
+	map<string, AttrVal>::iterator iter;
+	for (iter = m.begin(); iter != m.end(); iter++) {
+		cout << iter->first << endl;
+		if (iter->second.pval) {
+			printTree(iter->second.pval, 1);
+		}
+		else cout << "  NULL" << endl;
+	}
+	cout << "-----------------------" << endl;
+}
+
+map<string, AttrVal> merge(map<string, AttrVal> m1, map<string, AttrVal> m2) {
+	for (auto &it : m2) {
+		m1[it.first] = it.second;
+	}
+	return m1;
+}
+
+void addToEnv(Node* node) {
+	char* tmp = node->son->val.sval;
+	string name(tmp);
+	if (tab.find(name) == tab.end()) {
+		tab[name] = node->son->bro->val;
+	}
+}
