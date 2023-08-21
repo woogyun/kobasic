@@ -3,8 +3,13 @@
 #include <stdlib.h>
 #include <map>
 #include <vector>
+#include <cmath>
+#include <stack>
+#include <tuple>
+#include <limits>
 
 #define MAXLEN 100
+#define NUM_FUNCTIONS 32
 
 #define NUMBER 130
 #define REM 131
@@ -121,7 +126,8 @@
 #define UMINUS 242
 #define VAR 243
 #define CLO 244
-#define NUM_FUNCTIONS 32
+#define CMP_EQ 245
+#define ARR 246
 
 using namespace std;
 
@@ -133,6 +139,13 @@ const string functionNames[NUM_FUNCTIONS] = {
     "UCASE", "USR", "LEFT", "RIGHT", "STRNG", "MID", "SEG", "SUBSTR"
 };
 
+enum class ExceptionCode {
+    NextWithoutFor,
+    SyntaxError,
+    typeMisMatch,
+    NOT_DECLARED
+};
+
 typedef struct _AttrVal{
 	int tag;
 	union {
@@ -140,6 +153,7 @@ typedef struct _AttrVal{
 		char* sval;
 		struct _node* pval;
 	};
+	vector<_AttrVal> arr;
 } AttrVal;
 
 typedef struct _node {
@@ -192,16 +206,26 @@ void setFunList();
 void printFunList();
 map<string, AttrVal> merge(map<string, AttrVal>, map<string, AttrVal>);
 void addToEnv(Node*);
+Node* exec(Node*); 
+AttrVal getValueOf(Node*);
+bool isComparisonOperator(char);
+vector<Node*> dataQueue;
+int dataQueueIndex;
+stack<tuple<long int, int, int>> forStack;
+stack<long int> gosubStack;
+map<int, Node*> linedStmt;
+map<string, Node*> forTab;
+stack<Node*> callStack;
+int getIndex(Node*);
+bool isAllDigits(const string&);
+bool continueExecution = true;
 
 int main(void) {
 	fp = fopen("fin.txt", "r");
 	if (!fp) fp = stdin;
-
+	cout << "" << endl;
 	lookahead = getToken();
 	Prog();
-	
-	printEnv();
-	printFunList();
 	return 0;
 }
 
@@ -211,6 +235,29 @@ int getToken() {
 	while (c = fgetc(fp)) {
 		if (c == '\n') return '\n';
 		if (isspace(c)) continue;
+		
+		if (isComparisonOperator(c)) {
+			buffer[i++] = c;
+			while (c = fgetc(fp)) {
+				if (isComparisonOperator(c)) {
+					buffer[i++] = c;
+				}
+				else {
+					ungetc(c, fp);
+					buffer[i] = '\0';
+					break;
+				}
+			}
+			if (i == 1) {
+				return buffer[0];
+			}
+			else if (i == 2) {
+				if (!strcmp(buffer, ">=") || !strcmp(buffer, "=>")) return CMP_GE;
+				else if (!strcmp(buffer, "<=") || !strcmp(buffer, "=<")) return CMP_LE;
+				else if (!strcmp(buffer, "<>") || !strcmp(buffer, "><")) return CMP_NE;
+			}
+			else return -1;
+		}
 		
 		if (isdigit(c)) {
 			buffer[i++] = c;
@@ -242,7 +289,7 @@ int getToken() {
 			return STRING;
 		}
 
-		if (isalpha(c)) {
+		if (isalpha(c) || c == '$') {
 			buffer[i++] = c;
 			while (c = fgetc(fp)) {
 				if (isalpha(c) || c == '_' || isdigit(c)) {
@@ -373,7 +420,6 @@ int getToken() {
 				}
 			}
 		}
-		// Handling single character token
 		return c;
 	}
 	return -1;
@@ -722,6 +768,9 @@ void printToken(int token) {
 	else if (token == UCASE) {
 	    printf("UCASE");
 	}	
+	else if (token == CMP_EQ) {
+		printf("CMP_EQ");
+	}
 	else if (token == FUN) {
 	    printf("FUN(%s)", attrVal.sval);
 	}	
@@ -742,35 +791,48 @@ void match(int expected) {
         lookahead = getToken();
     }
     else {
-        printf("Syntax error: Expected token ");
+    	printf("Syntax error: Expected token ");
 		printToken(expected);
 		printf(", found token ");
 		printToken(lookahead);
 		printf("\n");
-        exit(1);
+    	throw ExceptionCode::SyntaxError;
     }
 }
 
 void Prog() {
+	Node* lines = newNode(0);
 	setFunList();
-	tab = merge(tab, funList);
+	// tab = merge(tab, funList);
     while (fgetc(fp) != EOF) {
-    	Node* line;
-    	traverse(line = Line());
-    	printTree(line, 0);
-        if(lookahead = '\n')
+    	Node* line = Line();
+    	append(lines, line);
+        if (lookahead = '\n')
         	match('\n');
     }
+    // printTree(lines, 0);
+    append(lines, newNode(END));
+    // printTree(lines, 0);
+    exec(lines);
 }
 
 Node* Line() {
 	Node* node = newNode(0);
+	if (lookahead == '\n') {
+		match('\n');
+	}
     if (lookahead == NUMBER) {
+    	int lineNumber;
     	node = newNode(NUMBER);
     	node->val = mkInt(attrVal.ival); 
         match(NUMBER);
+		// node->son = Stmts();
+    	lineNumber = node->val.ival;
+    	node = Stmts();
+    	linedStmt[lineNumber] = node;
     }
-    node->son = Stmts();
+    
+    else node = Stmts();
     return node;
 }
 
@@ -844,11 +906,9 @@ Node* Stmt() {
         node->son = Var();
         match('=');
         append(node->son, Expr());
-        append(node->son, newNode(TO));
         match(TO);
         append(node->son, Expr());
         if (lookahead == STEP) {
-        	append(node->son, newNode(STEP));
             match(STEP);
             append(node->son, Expr());
 		}
@@ -882,7 +942,8 @@ Node* Stmt() {
         }
     } else if (lookahead == INPUT) {
         match(INPUT);
-        node->son = PrintList();
+        node->son = VarList();
+		append(node->son, PrintList());
     } else if (lookahead == IF) {
         match(IF);
         node->son = Expr();
@@ -932,11 +993,11 @@ Node* Stmt() {
         if (lookahead == GOTO) {
             match(GOTO);
             append(node->son, newNode(GOTO));
-            append(node->son, ExprList());
+            node->son->bro->son = ExprList();
         } else if (lookahead == GOSUB) {
             match(GOSUB);
             append(node->son, newNode(GOSUB));
-            append(node->son, ExprList());
+            node->son->bro->son = ExprList();
         }
     } else if (lookahead == OPTION) {
         match(OPTION);
@@ -1004,7 +1065,7 @@ Node* Stmt() {
         node->son = Var();
         match('=');
         append(node->son, Expr());
-        addToEnv(node);
+        // addToEnv(node);
     }
     return node;
 }
@@ -1036,6 +1097,9 @@ Node* Expr1() {
     while (lookahead == '=' || lookahead == '<' || lookahead == '>' ||
         lookahead == CMP_LE || lookahead == CMP_GE || lookahead == CMP_NE || lookahead == CMP_HASH) {
         node = newNode(lookahead);
+        if (lookahead == '=') {
+			node = newNode(CMP_EQ);
+		}
         match(lookahead);
         node->son = left;
         append(left, Expr2());
@@ -1077,10 +1141,13 @@ Node* Expr3() {
 
 Node* Expr4() {
     if (lookahead == '-' || lookahead == NOT) {
-    	Node* node = newNode(UMINUS);
+    	Node* node;
+    	if (lookahead == '-')
+    		node = newNode(UMINUS);
+    	else node = newNode(NOT);
     	node->val.ival = lookahead;
         match(lookahead);
-        node->son = Expr();
+        node->son = Func();
         return node;
     }
     return Func();
@@ -1206,14 +1273,17 @@ Node* UserFunc() {
 }
 
 Node* Var() {
-	Node* node = newNode(VAR);
+	Node* node;
+
+	node = newNode(VAR);
 	node->val.sval = attrVal.sval;
 	node->val.tag = VAR;
+	
     if (lookahead == VARIABLE_NAME) {
         match(VARIABLE_NAME);
         if (lookahead == '(') {
             match('(');
-            ExprList();
+            node->son = ExprList();
             match(')');
         } else if (lookahead == '[') {
             match('['); 
@@ -1242,7 +1312,7 @@ Node* PrintList() {
 			break;
 		}
 	    if (lookahead == ',' || lookahead == ';') {
-	    	append(node, newNode(lookahead));
+	    
 	    	match(lookahead);
 		}
 		else append(node, Expr());
@@ -1295,11 +1365,11 @@ Node* newNode(int nID) {
 }
 
 void printTree(Node *node, int depth) {
-	int i;
+
 	if (node == NULL) {
 		return;
 	}
-	for (i = 0; i < depth; i++) {
+	for (int i = 0; i < depth; i++) {
 		if(node->nID == 0) break;
 		printf("  ");
 	}
@@ -1317,28 +1387,6 @@ void append(Node *head, Node *elmt) {
 	head->bro = elmt;
 	head = tmp;
 } 
-
-void traverse(Node* node) {
-	if (node == NULL) return;
-	/*
-	if (node->nID == '=') {
-		if (node->bro) {
-			if (node->bro->nID == THEN || node->bro->nID == GOTO) return;
-		}
-		if (node->son) {
-			if (node->son->val.tag == VAR) {
-				char* tmp = node->son->val.sval;
-				string name(tmp);
-				if (tab.find(name) == tab.end()) {
-					tab[name] = node->son->bro->val;
-				}
-			}
-		}
-	}
-	*/
-	traverse(node->son);
-	traverse(node->bro);
-}
 
 void printEnv() {
 	cout << endl << endl;
@@ -1368,6 +1416,26 @@ void printEnv() {
 				printTree(v.pval, 1);
 			}
 		}
+		else if (v.tag == ARR) {
+			cout << iter->first << ": (ARR, ";
+			Node* sizeNode = v.pval;
+			string s;
+			while (true) {
+				int size = sizeNode->val.ival;
+				s += to_string(size);
+				if (!sizeNode->bro) {
+					break;
+				}
+				sizeNode = sizeNode->bro;
+				s += "x";
+			}
+			cout << s << ")" << endl;
+			cout << "[ ";
+			for (int i = 0; i < v.arr.size(); i++) {
+				cout << v.arr[i].ival << " ";
+			}
+			cout << "]" << endl;
+		}
 	}
 	cout << "-----------------------" << endl;
 }
@@ -1379,10 +1447,10 @@ AttrVal mkInt(int i) {
 	return val;
 }
 
-AttrVal mkStr(char* c) {
+AttrVal mkStr(char* s) {
 	AttrVal val;
-	val.sval = (char*)malloc(strlen(c) + 1);
-	strcpy(val.sval, c);
+	val.sval = (char*)malloc(strlen(s) + 1);
+	strcpy(val.sval, s);
 	val.tag = STRING;
 	return val;
 }
@@ -1467,9 +1535,667 @@ map<string, AttrVal> merge(map<string, AttrVal> m1, map<string, AttrVal> m2) {
 }
 
 void addToEnv(Node* node) {
-	char* tmp = node->son->val.sval;
-	string name(tmp);
+	char* varName = node->son->val.sval;
+	string name(varName);
 	if (tab.find(name) == tab.end()) {
 		tab[name] = node->son->bro->val;
 	}
+} 
+
+Node* exec(Node* node) {
+	if (node == NULL) return NULL;
+	
+	int token = node->nID;
+	bool ifStmtExecution = true;
+	switch (token) {
+		case IF: {
+			Node* conditionNode = node->son;
+			Node* stmtNode = conditionNode->bro;
+			conditionNode->bro = NULL;
+			ifStmtExecution = getValueOf(exec(conditionNode)).ival;
+			conditionNode->bro = stmtNode;
+			if (stmtNode->bro->nID == GOSUB) {
+				if (ifStmtExecution) {
+					Node* gosubNode = stmtNode->bro;
+					callStack.push(node);
+					int target = gosubNode->son->val.ival;
+					Node* dst = linedStmt[target];
+					exec(dst);
+				}
+				ifStmtExecution = false;
+			}
+			break;
+		}
+		
+		case ON: {
+			Node* index = node->son;
+			Node* branchNode = index->bro;
+			Node* dst = branchNode->son;
+			string varName = string(index->val.sval);
+			int val = tab[varName].ival;
+			val--;
+			while (val--) {
+				if (dst->bro) {
+					dst = dst->bro;
+					attrVal.ival = dst->val.ival;
+				}
+				else {
+					cout << "error" << endl;
+					exit(1);
+				}
+			}
+			node->son->bro->son = dst;
+			break;
+		}
+		
+		case DEF: {
+			ifStmtExecution = false;
+			break;
+		}
+	}
+	if (ifStmtExecution) {
+		exec(node->son);
+	}
+
+	switch (token) {
+		
+		case PRINT: {
+			string output;
+			bool newline = true;
+			if (node->son) {
+				Node* left = node->son;
+				while (left->bro) {
+					newline = true;
+					left = left->bro;
+					if (left->nID == ',') {
+						output += "\n";
+					}
+					else if (left->nID == ';') {
+						newline = false;
+						continue;
+					}
+					else if (left->val.tag == STRING) {
+						output += getValueOf(left).sval;
+					}
+					else if (left->nID == VAR) {
+						string varName = string(left->val.sval);
+						if (tab[varName].tag == STRING) {
+							output += getValueOf(left).sval;
+						}
+						else {
+							string value = to_string(getValueOf(left).ival);
+							output += value;
+						}
+					}
+					else if (left->nID == NUMBER || left->nID == FUN || left->val.tag == INT) {
+						string value = to_string(getValueOf(left).ival);
+						output += value;
+					}
+				}	
+			}
+			if (newline) output.push_back('\n');
+			cout << output;
+			break;
+		} 
+		
+		case INPUT: {
+			Node* varNode = node->son;
+			vector<string> varNames;
+			vector<AttrVal> vals;
+			string varName = string(varNode->val.sval);
+			while (true) {
+				string varName = string(varNode->val.sval);
+				varNames.push_back(varName);
+				if (varNode->bro) {
+					if (varNode->bro->val.tag != VAR) {
+						break;
+					}
+				}
+				varNode = varNode->bro;
+			}
+			Node* valNode = varNode->bro->bro;
+		
+			while (true) {
+				AttrVal val = valNode->val;
+				vals.push_back(val);
+				if (!valNode->bro) {
+					break;
+				}
+				valNode = valNode->bro;
+			}
+			
+			
+			for (int i = 0; i < varNames.size(); i++) {
+				tab[varNames[i]] = vals[i];
+			}
+			break;
+		}
+		
+		case REM: {
+			while (fgetc(fp) != '\n');
+			break;
+		}
+		
+		case DATA: {
+			Node* elmt = node->son;
+			while (true) {
+				dataQueue.push_back(elmt);
+				if (!elmt->bro) break;
+				elmt = elmt->bro;
+			}
+			break;
+		}
+		
+		
+		case DIM: {
+			Node* arrNode = node->son;
+			Node* sizeNode = arrNode->son;
+			int size;
+			string arrName;
+			
+			size = sizeNode->val.ival;
+			
+			Node* tmp = sizeNode;
+			while (sizeNode->bro) {
+				sizeNode = sizeNode->bro;
+				size *= sizeNode->val.ival;
+			}
+			sizeNode = tmp;
+			
+			AttrVal arrayVal;
+			arrayVal.pval = sizeNode;
+			arrayVal.tag = ARR;
+			arrayVal.arr = vector<AttrVal>(size);
+		
+			arrName = string(arrNode->val.sval);
+			
+			tab[arrName] = arrayVal;
+			
+			break;
+		}
+		
+		case END: {
+			printEnv();
+			exit(0);
+			break;
+		}
+		
+		case FOR: {
+			int init, term, step;
+			Node* var = node->son;
+			Node* begin = var->bro;
+			Node* end = begin->bro;
+					
+			string varName = string(var->val.sval);
+			init = begin->val.ival;
+			term = end->val.ival;
+			tab[varName] = mkInt(init);
+			if (end->bro) {
+				Node* stepNode = end->bro;
+				step = stepNode->val.ival;
+			} 
+			else {
+				step = 1;
+			}
+			forTab[varName] = node;
+			break;
+		}
+		
+		case NEXT: {
+			int init, term, step;
+			Node* var = node->son;
+			string varName;
+			varName = string(var->val.sval);
+			Node* forNode = forTab[varName];
+			if (!forNode) {
+				throw ExceptionCode::NextWithoutFor;
+			}
+			init = tab[varName].ival;
+			Node* termNode = forNode->son->bro->bro;
+			term = termNode->val.ival;
+			if (termNode->bro) {
+				step = termNode->bro->val.ival;	
+			}
+			else {
+				step = 1;
+			}
+			init += step;
+			tab[varName] = mkInt(init);
+			if (init >= term) {
+				tab.erase(varName);
+				forTab.erase(varName);
+				break;
+			}
+			exec(forTab[varName]->bro);
+			break;
+		}
+		
+		case GOSUB: {
+			callStack.push(node);
+			int target = node->son->val.ival;
+			Node* dst = linedStmt[target];
+			node = dst;
+			exec(node);
+			break;
+		}
+		
+		case GOTO: {
+			int target = node->son->val.ival;
+			Node* dst = linedStmt[target];
+			node = dst;
+			exec(node);
+			break;
+		}
+		
+		case NEW: {
+			map<string, AttrVal> emptyMap;
+			tab = emptyMap;
+			setFunList();
+			merge(tab, funList);
+			break;
+		}
+		
+		case READ: {
+			Node *elmt, *var;
+			var = node->son;
+			while (true) {
+				string varName = string(var->val.sval);
+				tab[varName] = dataQueue[dataQueueIndex++]->val;
+				if (!var->bro) break;
+				var = var->bro;
+			}
+			break;
+		}
+		
+		case RESTORE: {
+			dataQueueIndex = 0;
+			break;
+		}
+		
+		case RETURN: {
+			Node* target = callStack.top();
+			callStack.pop();
+			exec(target->bro);
+			break;
+		}
+		
+		case STOP: {
+			abort();
+			break;
+		}
+
+		case '=': {
+			
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				string varName = string(left->val.sval);
+				if ((tab.find(varName) != tab.end()) && (tab[varName].tag == ARR)) {
+					if (!left->son) {
+						throw ExceptionCode::typeMisMatch;
+					}
+					int index = getIndex(left);
+					tab[varName].arr[index] = getValueOf(exec(right));
+				}
+				else {
+					tab[varName] = getValueOf(exec(right));
+				}
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			
+			break;
+		}
+		
+		case AND: {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				node->nID = NUMBER;
+				node->val.ival = getValueOf(left).ival && getValueOf(right).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case OR: {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				node->nID = NUMBER;
+				node->val.ival = getValueOf(left).ival || getValueOf(right).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		  
+		case '+': {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				bool isStringVarAdd = false;
+				if ((left->val.tag == VAR) && (right->val.tag == VAR)) {
+					string lname = string(left->val.sval);
+					string rname = string(right->val.sval);
+					if (tab[lname].tag == STRING && tab[lname].tag == STRING) {
+						isStringVarAdd = true;
+					}
+				}
+				if ((node->son->val.tag == STRING && node->son->bro->val.tag == STRING) || isStringVarAdd) {
+					node->nID = STRING;
+					string res = string(getValueOf(left).sval) + string(getValueOf(right).sval);
+					char *tmp = const_cast<char*>(res.c_str());
+					node->val.sval = (char*) malloc(strlen(tmp) + 1);
+					strcpy(node->val.sval, tmp);
+					node->val.tag = STRING;
+				}
+				else {
+					node->val.ival = getValueOf(left).ival + getValueOf(right).ival;
+					node->val.tag = INT;	
+				}
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case '-': {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				node->val.ival = getValueOf(left).ival - getValueOf(right).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case '*': {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				node->val.ival = getValueOf(left).ival * getValueOf(right).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case '/': {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				if (getValueOf(right).ival == 0) {
+					cout << "error: div by zero" << endl;
+					exit(1);
+				}
+				node->val.ival = getValueOf(left).ival / getValueOf(right).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case '&': {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				node->val.ival = getValueOf(left).ival & getValueOf(right).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case '^': {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				node->val.ival = pow(getValueOf(left).ival, getValueOf(right).ival);
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+
+		case CMP_EQ: {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				node->val.ival = getValueOf(left).ival == getValueOf(right).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case '<': {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				node->val.ival = getValueOf(left).ival < getValueOf(right).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case '>': {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				node->val.ival = getValueOf(left).ival > getValueOf(right).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case CMP_LE: {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				node->val.ival = getValueOf(left).ival <= getValueOf(right).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case CMP_GE: {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				node->val.ival = getValueOf(left).ival >= getValueOf(right).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case CMP_NE: {
+			if (node->son && node->son->bro) {
+				Node* left = node->son;
+				Node* right = node->son->bro;
+				node->val.ival = getValueOf(left).ival != getValueOf(right).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case UMINUS: {
+			if (node->son) {
+				Node* left = node->son;
+				node->val.ival = -getValueOf(left).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+		
+		case NOT: {
+			if (node->son) {
+				Node* left = node->son;
+				node->val.ival = !getValueOf(left).ival;
+				node->val.tag = INT;
+			}
+			else {
+				cout << "error" << endl;
+				exit(1);
+			}
+			break;
+		}
+	}
+
+	exec(node->bro);
+	
+	return node;
+}
+
+AttrVal getValueOf(Node* node) {
+	if (node->val.tag == INT) {
+		return node->val;
+	}
+	if (node->nID == NUMBER) {
+		return node->val;
+	}
+	else if (node->nID == UMINUS) {
+		AttrVal v;
+		v.ival = -node->son->val.ival;
+		return v;
+	}
+	else if (node->nID == VAR) {
+		string varName = string(node->val.sval);
+		if (tab.find(varName) != tab.end()) {
+			if (tab[varName].tag == ARR) {
+				int index = getIndex(node);
+				return tab[varName].arr[index];
+			}
+			return tab[varName];
+		}
+		else {
+			throw ExceptionCode::NOT_DECLARED;
+		}
+	}
+	else if (node->nID == FUN) {
+		map<string, AttrVal> declaredVars;
+		vector<string> used;
+		AttrVal result;
+		string funName = string(node->val.sval);
+		if (tab.find(funName) == tab.end()) {
+			throw ExceptionCode::NOT_DECLARED;
+		}
+		
+		Node* param = tab[funName].pval->son;
+		Node* arg = node->son;
+		while (true) {
+			if (!(param->bro)) {
+				break;
+			}
+			string varName = string(param->val.sval);
+			if (tab.find(varName) != tab.end()) {
+				declaredVars[varName] = tab[varName];
+			}
+			tab[varName] = arg->val;
+			used.push_back(varName);
+			param = param->bro;
+			arg = arg->bro;
+		}
+		Node* resultNode = exec(param);
+		result = resultNode->val;
+		for (string varName : used) {
+			if (declaredVars.find(varName) == declaredVars.end()) {
+				tab.erase(varName);
+			}
+			else {
+				tab[varName] = declaredVars[varName];
+			}
+		}
+		return result;
+		
+	}
+	else if (node->nID == STRING) {
+		return node->val;
+	} 
+}
+
+bool isComparisonOperator(char c) {
+	return (c == '>' || c == '<' || c == '=');
+}
+
+int getIndex(Node* varNode) {
+	string varName = string(varNode->val.sval);
+	int index = 0, size;
+	Node* sizeNode = tab[varName].pval;
+	Node* indexNode = varNode->son;
+	size = tab[varName].arr.size();
+	
+	while (true) {
+		size /= sizeNode->val.ival;
+		index += getValueOf(indexNode).ival * size;
+		if (sizeNode->bro == NULL) {
+			break;
+		}
+		sizeNode = sizeNode->bro;
+		indexNode = indexNode->bro;
+	}
+	return index;
+}
+
+bool isAllDigits(const string& str) {
+    for (char c : str) {
+        if (!isdigit(c)) {
+            return false;
+        }
+    }
+    return true;
 }
