@@ -4,61 +4,31 @@
 <Line> ::= NUMBER <stmts>
 
 <stmts> ::= <stmt> 
-	| <stmt> ': '<stmts>
+	| <stmt> ':' <stmts>
 
 <stmt> ::= REM
-	| QUOTEREM
-	| BYE
-	| CALL <expr>
-	| CHANGE <var> TO <var>
-	| CLS
-	| CMD
 	| DATA <exprlist>
 	| DEF <userfunc> '=' <expr>
-	| DEFDBL <varlist>
-	| DEFINT <varlist>
-	| DEFSNG <varlist>
-	| DEFSTR <varlist>
 	| DIM <varlist>
 	| END
-	| EXIT
 	| FOR <var> '=' <expr> TO <expr>
 	| FOR <var> '=' <expr> TO <expr> STEP <expr>
 	| GOSUB NUMBER
-	| GOSUB <expr>
-	| GOSUB <expr> OF <exprlist>
 	| GOTO NUMBER
-	| GOTO <expr>
-	| GOTO <expr> OF <exprlist>
-	| INPUT <printlist>
-	| IF <expr> THEN NUMBER
+	| INPUT <varlist> <exprlist>
 	| IF <expr> GOTO NUMBER
-	| IF <expr> THEN <stmts>
+	| IF <expr> THEN <stmt>
 	| LET <var> '=' <expr>
 	| NEXT <varlist>
-	| NEXT 
 	| NEW
 	| ON <expr> GOTO <exprlist>
 	| ON <expr> GOSUB <exprlist>
-	| OPTION BASE <expr>
-	| POKE <expr> ',' <expr>
-	| POP
 	| PRINT <printlist>
-	| PRINT USING <expr> ';' <printlist>
-	| RANDOMIZE
-	| RANDOMIZE <expr>
 	| READ <varlist>
 	| RESTORE
 	| RESTORE <expr>
 	| RETURN
 	| STOP
-	| STOP <expr>
-	| STRING <expr>
-	| SYS <expr>
-	| TIME_STR '=' <expr>
-	| LET TIME_STR '=' <expr>
-	| VARLIST
-	| WAIT <expr>
 	| <var> '=' <expr>
 <expr> ::= <expr0>
 <expr0> ::= <expr1>
@@ -89,10 +59,10 @@
 	| <fn1> '(' <expr> ')'
 	| <fn2> '(' <expr> ',' <expr> ')'
 	| <fnx> '(' <expr> ',' <expr> ',' <expr> ')'
-<fn0> ::= FRE | RND | TIME | TIME_STR
-<fn1> ::= ABS | ATN | CHR | CLOG | COS | EXP | FIX | INT | LCASE | LEN | LIN | STR | LOG | PEEK | SGN | SIN | SPC | SQR | TAB | VAL | UCASE | USR 
-<fn2> ::= LEFT | RIGHT | STRNG
-<fnx> ::= MID | SEG | SUBSTR
+<fn0> ::=
+<fn1> ::= ABS
+<fn2> ::= 
+<fnx> ::= MID
 <factor> ::= NUMBER
 	| STRING
 	| <var>
@@ -101,9 +71,6 @@
 <userfunc> ::= FUNCTION_NAME '(' <exprlist> ')'
 <var> ::= VARIABLE_NAME 
 	| VARIALBE_NAME '(' <exprlist> ')'
-	| VARIABLE_NAME '[' <exprlist> ']'
-	| VARIALBE_NAME '(' <slicelist> ')'
-	| VARIALBE_NAME '(' <exprlist> ')' '(' <slicelist> ')'
 <printlist> ::= <expr>
 	| <printlist> <expr>
 	| <printsep>
@@ -111,8 +78,5 @@
 <printsep> ::= ',' | ';'
 <exprlist> ::= <expr>
 	| <exprlist> ',' <expr>
-<slicelist> ::= <expr> ':' <expr>
 <varlist> ::= <var>
 	| <varlist> ',' <var>
-<numlist> ::= NUMBER
-	| <numlist> ',' NUMBER
