@@ -7,6 +7,8 @@
 #include <stack>
 #include <tuple>
 #include <limits>
+#include <windows.h>
+
 
 #define MAXLEN 100
 #define NUM_FUNCTIONS 32
@@ -128,6 +130,7 @@
 #define CLO 244
 #define CMP_EQ 245
 #define ARR 246
+#define CONT 247
 
 using namespace std;
 
@@ -192,7 +195,7 @@ AttrVal attrVal;
 Node* newNode(int);
 void printTree(Node*, int);
 void append(Node*, Node*);
-void traverse(Node*);
+Node* traverse(Node*);
 void printEnv();
 map<string, AttrVal> funList;
 AttrVal mkInt(int);
@@ -219,11 +222,21 @@ stack<Node*> callStack;
 int getIndex(Node*);
 bool isAllDigits(const string&);
 bool continueExecution = true;
+bool isBuiltinFunction(string);
+AttrVal getBuiltinFunctionResult(string fname, Node* arg);
+bool ishangul(char);
+const char* toUtf8(const char*);
+pair<Node*, Node*> stopPos;
 
 int main(void) {
+
+	
+	
+	
 	fp = fopen("fin.txt", "r");
 	if (!fp) fp = stdin;
 	cout << "" << endl;
+	
 	lookahead = getToken();
 	Prog();
 	return 0;
@@ -231,8 +244,16 @@ int main(void) {
 
 int getToken() {
 	char c, buffer[MAXLEN];
+	if (lookahead == REM) {
+		while (c = fgetc(fp)) {
+			if (c == '\n' || c == EOF) {
+				break;
+			}
+		}
+	}
 	int i = 0;
 	while (c = fgetc(fp)) {
+		
 		if (c == '\n') return '\n';
 		if (isspace(c)) continue;
 		
@@ -252,9 +273,9 @@ int getToken() {
 				return buffer[0];
 			}
 			else if (i == 2) {
-				if (!strcmp(buffer, ">=") || !strcmp(buffer, "=>")) return CMP_GE;
-				else if (!strcmp(buffer, "<=") || !strcmp(buffer, "=<")) return CMP_LE;
-				else if (!strcmp(buffer, "<>") || !strcmp(buffer, "><")) return CMP_NE;
+				if (!strcmp(buffer, ">=")) return CMP_GE;
+				else if (!strcmp(buffer, "<=")) return CMP_LE;
+				else if (!strcmp(buffer, "<>")) return CMP_NE;
 			}
 			else return -1;
 		}
@@ -288,52 +309,69 @@ int getToken() {
 			attrVal = mkStr(buffer);
 			return STRING;
 		}
-
-		if (isalpha(c) || c == '$') {
+		
+		if (c == '.' || c == '&' || c == '|') {
 			buffer[i++] = c;
 			while (c = fgetc(fp)) {
-				if (isalpha(c) || c == '_' || isdigit(c)) {
+				if (c == '.' || c == '&' || c == '|') {
+					buffer[i++] = c;
+				}
+				else {
+					ungetc(c, fp);
+					buffer[i] = '\0';
+					if (!strcmp(buffer, "..")) return TO;
+					else if (!strcmp(buffer, "&&")) return AND;
+					else if (!strcmp(buffer, "||")) return OR;
+					return -1;
+				}
+			}
+		}
+
+		if (isalpha(c) || c == '$' || ishangul(c)) {
+			buffer[i++] = c;
+			while (c = fgetc(fp)) {
+				if (isalpha(c) || c == '_' || isdigit(c) || ishangul(c)) {
 					buffer[i++] = c;
 				}
 				else {
 					ungetc(c, fp);
 					buffer[i] = '\0';
 					for(char* c = buffer; *c = toupper(*c); c++);
-					
-					if (!strcmp(buffer, "REM")) return REM;
-					else if (!strcmp(buffer, "DEF")) return DEF;
+					if (!strcmp(buffer, "REM") || !strcmp(buffer, toUtf8("주석"))) return REM;
+					else if (!strcmp(buffer, "DEF") || !strcmp(buffer, toUtf8("함수"))) return DEF;
 					else if (!strcmp(buffer, "QUOTEREM")) return QUOTEREM;
 					else if (!strcmp(buffer, "BYE")) return BYE;
+					else if (!strcmp(buffer, "CONT") || !strcmp(buffer, toUtf8("재개"))) return CONT;
 					else if (!strcmp(buffer, "CMD")) return CMD;
 					else if (!strcmp(buffer, "CALL")) return CALL;
 					else if (!strcmp(buffer, "CHANGE")) return CHANGE;
 					else if (!strcmp(buffer, "CLS")) return CLS;
-					else if (!strcmp(buffer, "DATA")) return DATA;
-					else if (!strcmp(buffer, "END")) return END;
+					else if (!strcmp(buffer, "DATA")|| !strcmp(buffer, toUtf8("자료"))) return DATA;
+					else if (!strcmp(buffer, "END")|| !strcmp(buffer, toUtf8("끝"))) return END;
 					else if (!strcmp(buffer, "EXIT")) return EXIT;
-					else if (!strcmp(buffer, "FOR")) return FOR;
-					else if (!strcmp(buffer, "TO")) return TO;
-					else if (!strcmp(buffer, "GOSUB")) return GOSUB;
+					else if (!strcmp(buffer, "FOR") || !strcmp(buffer, toUtf8("반복"))) return FOR;
+					else if (!strcmp(buffer, "TO") || !strcmp(buffer, "..")) return TO;
+					else if (!strcmp(buffer, "GOSUB") || !strcmp(buffer, toUtf8("순회"))) return GOSUB;
 					else if (!strcmp(buffer, "OF")) return OF;
-					else if (!strcmp(buffer, "INPUT")) return INPUT;
-					else if (!strcmp(buffer, "THEN")) return THEN;
-					else if (!strcmp(buffer, "IF")) return IF;
-					else if (!strcmp(buffer, "GOTO")) return GOTO;
-					else if (!strcmp(buffer, "LET")) return LET;
-					else if (!strcmp(buffer, "NEXT")) return NEXT;
-					else if (!strcmp(buffer, "NEW")) return NEW;
-					else if (!strcmp(buffer, "ON")) return ON;
+					else if (!strcmp(buffer, "INPUT") || !strcmp(buffer, toUtf8("입력"))) return INPUT;
+					else if (!strcmp(buffer, "THEN") || !strcmp(buffer, toUtf8("참이면"))) return THEN;
+					else if (!strcmp(buffer, "IF") || !strcmp(buffer, toUtf8("조건"))) return IF;
+					else if (!strcmp(buffer, "GOTO") || !strcmp(buffer, toUtf8("분기"))) return GOTO;
+					else if (!strcmp(buffer, "LET") || !strcmp(buffer, toUtf8("변수"))) return LET;
+					else if (!strcmp(buffer, "NEXT") || !strcmp(buffer, toUtf8("다음"))) return NEXT;
+					else if (!strcmp(buffer, "NEW")|| !strcmp(buffer, toUtf8("초기화"))) return NEW;
+					else if (!strcmp(buffer, "ON")|| !strcmp(buffer, toUtf8("검사"))) return ON;
 					else if (!strcmp(buffer, "OPTION")) return OPTION;
 					else if (!strcmp(buffer, "BASE")) return BASE;
 					else if (!strcmp(buffer, "POKE")) return POKE;
 					else if (!strcmp(buffer, "POP")) return POP;
-					else if (!strcmp(buffer, "PRINT")) return PRINT;
+					else if (!strcmp(buffer, "PRINT") || !strcmp(buffer, toUtf8("출력"))) return PRINT;
 					else if (!strcmp(buffer, "USING")) return USING;
 					else if (!strcmp(buffer, "RANDOMIZE")) return RANDOMIZE;
-					else if (!strcmp(buffer, "READ")) return READ;
-					else if (!strcmp(buffer, "RESTORE")) return RESTORE;
-					else if (!strcmp(buffer, "RETURN")) return RETURN;
-					else if (!strcmp(buffer, "STOP")) return STOP;
+					else if (!strcmp(buffer, "READ")|| !strcmp(buffer, toUtf8("읽기"))) return READ;
+					else if (!strcmp(buffer, "RESTORE")|| !strcmp(buffer, toUtf8("첫자료"))) return RESTORE;
+					else if (!strcmp(buffer, "RETURN")|| !strcmp(buffer, toUtf8("복귀"))) return RETURN;
+					else if (!strcmp(buffer, "STOP")|| !strcmp(buffer, toUtf8("중지"))) return STOP;
 					else if (!strcmp(buffer, "STRING")) return STRING;
 					else if (!strcmp(buffer, "SYS")) return SYS;
 					else if (!strcmp(buffer, "TIME_STR")) return TIME_STR;
@@ -341,9 +379,6 @@ int getToken() {
 					else if (!strcmp(buffer, "WAIT")) return WAIT;
 					else if (!strcmp(buffer, "AND")) return AND;
 					else if (!strcmp(buffer, "OR")) return OR;
-					else if (!strcmp(buffer, "CMP_LE")) return CMP_LE;
-					else if (!strcmp(buffer, "CMP_GE")) return CMP_GE ;
-					else if (!strcmp(buffer, "CMP_NE")) return CMP_NE;
 					else if (!strcmp(buffer, "CMP_HASH")) return CMP_HASH;
 					else if (!strcmp(buffer, "NOT")) return NOT;
 					else if (!strcmp(buffer, "FRE")) return FRE;
@@ -367,7 +402,7 @@ int getToken() {
 					else if (!strcmp(buffer, "LEFT")) return LEFT;
 					else if (!strcmp(buffer, "RIGHT")) return RIGHT;
 					else if (!strcmp(buffer, "STRNG")) return STRNG;
-					else if (!strcmp(buffer, "MID")) return MID;
+					else if (!strcmp(buffer, "MID")|| !strcmp(buffer, toUtf8("중간"))) return MID;
 					else if (!strcmp(buffer, "SEG")) return SEG;
 					else if (!strcmp(buffer, "SUBSTR")) return SUBSTR;
 					else if (!strcmp(buffer, "DOUBLE")) return DOUBLE;
@@ -376,10 +411,10 @@ int getToken() {
 					else if (!strcmp(buffer, "BANGREM")) return BANGREM;
 					else if (!strcmp(buffer, "CLEAR")) return CLEAR;
 					else if (!strcmp(buffer, "CLR")) return CLR;
-					else if (!strcmp(buffer, "DIM")) return DIM;
+					else if (!strcmp(buffer, "DIM")|| !strcmp(buffer, toUtf8("배열"))) return DIM;
 					else if (!strcmp(buffer, "GET")) return GET;
 					else if (!strcmp(buffer, "LIST")) return LIST;
-					else if (!strcmp(buffer, "STEP")) return STEP;
+					else if (!strcmp(buffer, "STEP")|| !strcmp(buffer, toUtf8("폭"))) return STEP;
 					else if (!strcmp(buffer, "OPEN")) return OPEN;
 					else if (!strcmp(buffer, "CLOSE")) return CLOSE;
 					else if (!strcmp(buffer, "STATUS")) return STATUS;
@@ -434,6 +469,9 @@ void printToken(int token) {
 	}
 	else if (token == STRING) {
 	    printf("STRING(%s)", attrVal.sval);
+	}
+	else if (token == CONT) {
+		printf("CONT");
 	}
 	else if (token == NUMBER) {
 		printf("NUM(%d)", attrVal.ival);
@@ -796,7 +834,7 @@ void match(int expected) {
 		printf(", found token ");
 		printToken(lookahead);
 		printf("\n");
-    	throw ExceptionCode::SyntaxError;
+    	exit(1);
     }
 }
 
@@ -810,29 +848,28 @@ void Prog() {
         if (lookahead = '\n')
         	match('\n');
     }
-    // printTree(lines, 0);
+    printTree(lines, 0);
     append(lines, newNode(END));
     // printTree(lines, 0);
     exec(lines);
 }
 
 Node* Line() {
-	Node* node = newNode(0);
+	Node* node;
 	if (lookahead == '\n') {
 		match('\n');
 	}
+	int lineNumber;
     if (lookahead == NUMBER) {
-    	int lineNumber;
-    	node = newNode(NUMBER);
-    	node->val = mkInt(attrVal.ival); 
         match(NUMBER);
-		// node->son = Stmts();
-    	lineNumber = node->val.ival;
+    	lineNumber = attrVal.ival;
     	node = Stmts();
     	linedStmt[lineNumber] = node;
     }
     
-    else node = Stmts();
+    else {
+		node = Stmts();
+	}
     return node;
 }
 
@@ -1037,10 +1074,9 @@ Node* Stmt() {
         match(RETURN);
     } else if (lookahead == STOP) {
         match(STOP);
-        if (lookahead != '\n') {
-            node->son = Expr();
-        }
-    } else if (lookahead == STRING) { 
+    } else if (lookahead == CONT) {
+    	match(CONT);
+	} else if (lookahead == STRING) { 
     	node->val.sval = attrVal.sval;
     	node->val.tag = STRING;
         match(STRING);
@@ -1563,6 +1599,12 @@ Node* exec(Node* node) {
 					exec(dst);
 				}
 				ifStmtExecution = false;
+			} 
+			else if (stmtNode->bro->nID == STOP) {
+				Node* cont = traverse(node);
+				if (!cont) {
+					exit(1);
+				}
 			}
 			break;
 		}
@@ -1608,7 +1650,7 @@ Node* exec(Node* node) {
 					newline = true;
 					left = left->bro;
 					if (left->nID == ',') {
-						output += "\n";
+						output += "\t";
 					}
 					else if (left->nID == ';') {
 						newline = false;
@@ -1627,7 +1669,17 @@ Node* exec(Node* node) {
 							output += value;
 						}
 					}
-					else if (left->nID == NUMBER || left->nID == FUN || left->val.tag == INT) {
+					else if (left->nID == FUN) {
+						AttrVal val = getValueOf(left);
+						if (val.tag == STRING) {
+							output += val.sval;
+						}
+						else {
+							string value = to_string(val.ival);
+							output += value;
+						}
+					}
+					else if (left->nID == NUMBER || left->val.tag == INT) {
 						string value = to_string(getValueOf(left).ival);
 						output += value;
 					}
@@ -1672,7 +1724,6 @@ Node* exec(Node* node) {
 		}
 		
 		case REM: {
-			while (fgetc(fp) != '\n');
 			break;
 		}
 		
@@ -1812,18 +1863,22 @@ Node* exec(Node* node) {
 			break;
 		}
 		
+		case STOP: {
+			Node* cont = traverse(node);
+			if (!cont) {
+				exit(1);
+			}
+			break;
+		}
+		
 		case RETURN: {
 			Node* target = callStack.top();
 			callStack.pop();
 			exec(target->bro);
 			break;
 		}
+	
 		
-		case STOP: {
-			abort();
-			break;
-		}
-
 		case '=': {
 			
 			if (node->son && node->son->bro) {
@@ -1887,12 +1942,23 @@ Node* exec(Node* node) {
 				if ((left->val.tag == VAR) && (right->val.tag == VAR)) {
 					string lname = string(left->val.sval);
 					string rname = string(right->val.sval);
-					if (tab[lname].tag == STRING && tab[lname].tag == STRING) {
+					if (tab[lname].tag == STRING && tab[rname].tag == STRING) {
+						isStringVarAdd = true;
+					}
+				}
+				else if ((left->val.tag == VAR) && right->val.tag == STRING) {
+					string lname = string(left->val.sval);
+					if (tab[lname].tag == STRING) {
+						isStringVarAdd = true;
+					}
+				}
+				else if ((left->val.tag == STRING) && (right->val.tag == VAR)) {
+					string rname = string(right->val.sval);
+					if (tab[rname].tag == STRING) {
 						isStringVarAdd = true;
 					}
 				}
 				if ((node->son->val.tag == STRING && node->son->bro->val.tag == STRING) || isStringVarAdd) {
-					node->nID = STRING;
 					string res = string(getValueOf(left).sval) + string(getValueOf(right).sval);
 					char *tmp = const_cast<char*>(res.c_str());
 					node->val.sval = (char*) malloc(strlen(tmp) + 1);
@@ -2131,12 +2197,20 @@ AttrVal getValueOf(Node* node) {
 		vector<string> used;
 		AttrVal result;
 		string funName = string(node->val.sval);
+		
 		if (tab.find(funName) == tab.end()) {
 			throw ExceptionCode::NOT_DECLARED;
 		}
 		
+		if (isBuiltinFunction(funName)) {
+			return getBuiltinFunctionResult(funName, node);
+		}
+		
 		Node* param = tab[funName].pval->son;
+
 		Node* arg = node->son;
+		
+
 		while (true) {
 			if (!(param->bro)) {
 				break;
@@ -2145,13 +2219,15 @@ AttrVal getValueOf(Node* node) {
 			if (tab.find(varName) != tab.end()) {
 				declaredVars[varName] = tab[varName];
 			}
-			tab[varName] = arg->val;
+			tab[varName] = getValueOf(arg);
 			used.push_back(varName);
 			param = param->bro;
 			arg = arg->bro;
 		}
+
 		Node* resultNode = exec(param);
-		result = resultNode->val;
+
+		result = getValueOf(resultNode);
 		for (string varName : used) {
 			if (declaredVars.find(varName) == declaredVars.end()) {
 				tab.erase(varName);
@@ -2163,7 +2239,7 @@ AttrVal getValueOf(Node* node) {
 		return result;
 		
 	}
-	else if (node->nID == STRING) {
+	else if (node->val.tag == STRING) {
 		return node->val;
 	} 
 }
@@ -2198,4 +2274,66 @@ bool isAllDigits(const string& str) {
         }
     }
     return true;
+}
+
+bool isBuiltinFunction(string fname) {
+	for (int i = 0; i < NUM_FUNCTIONS; i++) {
+		if (fname == functionNames[i]) {
+			return true;
+		}
+	}
+	return false;
+}
+
+AttrVal getBuiltinFunctionResult(string fname, Node* node) {
+	AttrVal result;
+	if (fname == "ABS") {
+		int v = getValueOf(node->son).ival;
+		result.ival = abs(v);
+		result.tag = INT;
+	}
+	else if (fname == "MID") {
+		string str;
+		int start, len;
+		Node* strNode = node->son;
+		Node* startNode = strNode->bro;
+		Node* lenNode = startNode->bro;
+	
+		str = string(getValueOf(strNode).sval);
+		start = startNode->val.ival;
+		len = lenNode->val.ival;
+		
+		str = str.substr(start, len);
+		
+		result.tag = STRING;
+		char *s = const_cast<char*>(str.c_str());
+		result.sval = (char *) malloc(strlen(s) + 1);
+		strcpy(result.sval, s);
+	}
+
+	return result;
+}
+
+bool ishangul(char c) {
+	if (c == EOF) return false;
+	return (c & 0x80);
+}
+
+const char* toUtf8(const char* ansi) {
+    WCHAR unicode[MAXLEN];
+    char utf8[MAXLEN * 3];
+    MultiByteToWideChar(CP_ACP, 0, ansi, -1, unicode, sizeof(unicode) / sizeof(WCHAR));
+    WideCharToMultiByte(CP_UTF8, 0, unicode, -1, utf8, sizeof(utf8), NULL, NULL);
+    return _strdup(utf8);
+}
+
+Node* traverse(Node* node) {
+	if (!node) return NULL;
+	
+	if (node->nID == CONT) {
+		return node;
+	}
+	
+	traverse(node->son);
+	traverse(node->bro);
 }
